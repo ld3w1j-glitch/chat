@@ -266,6 +266,121 @@ def public_fofoca_model(model: dict) -> dict:
     return clean
 
 
+def _fofoca_pillow_fonts():
+    from PIL import ImageFont
+
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]
+    def pick(size: int, bold: bool = False):
+        order = candidates if bold else list(reversed(candidates))
+        for path in order:
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                continue
+        return ImageFont.load_default()
+
+    return {
+        "headline": pick(64, bold=True),
+        "label": pick(28, bold=True),
+        "note": pick(22, bold=False),
+        "big": pick(44, bold=True),
+    }
+
+
+def _wrap_text_for_draw(draw, text: str, font, max_width: int, max_lines: int) -> list[str]:
+    words = str(text or "").split()
+    if not words:
+        return [""]
+    lines: list[str] = []
+    line = words.pop(0)
+    for word in words:
+        test = f"{line} {word}".strip()
+        bbox = draw.textbbox((0, 0), test, font=font)
+        width = bbox[2] - bbox[0]
+        if width <= max_width:
+            line = test
+        else:
+            lines.append(line)
+            line = word
+    if line:
+        lines.append(line)
+    lines = lines[:max_lines]
+    if len(lines) == max_lines:
+        last = lines[-1]
+        while draw.textbbox((0, 0), last + "…", font=font)[2] > max_width and len(last) > 1:
+            last = last[:-1]
+        lines[-1] = last + ("…" if last != lines[-1] else "")
+    return lines
+
+
+def _render_fofoca_reference_assets(model: dict, overlay_path: Path | None) -> dict[str, bytes]:
+    from PIL import Image, ImageDraw
+
+    canvas = model.get("canvas") or {}
+    width = int(canvas.get("width") or 1080)
+    height = int(canvas.get("height") or 1350)
+    photo = model.get("photo") or {"x": 0, "y": 0, "width": width, "height": 760}
+    headline = model.get("headline") or {}
+    fonts = _fofoca_pillow_fonts()
+
+    if overlay_path and overlay_path.exists():
+        overlay = Image.open(overlay_path).convert("RGBA")
+    else:
+        overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+
+    # guia_areas.png
+    guide = overlay.copy()
+    gd = ImageDraw.Draw(guide, "RGBA")
+    photo_box = [int(photo.get("x") or 0), int(photo.get("y") or 0), int(photo.get("x") or 0) + int(photo.get("width") or width), int(photo.get("y") or 0) + int(photo.get("height") or 760)]
+    headline_box = [int(headline.get("x") or 90), int((headline.get("y") or 1000) - (headline.get("font_size") or 64)), int(headline.get("x") or 90) + int(headline.get("max_width") or 900), int((headline.get("y") or 1000) + (headline.get("line_height") or 78) * max(1, int(headline.get("max_lines") or 3)))]
+    gd.rectangle(photo_box, outline=(67, 181, 129, 255), width=6, fill=(67, 181, 129, 40))
+    gd.rectangle(headline_box, outline=(255, 179, 0, 255), width=6, fill=(255, 179, 0, 40))
+    gd.rounded_rectangle((24, height - 144, width - 24, height - 24), radius=24, fill=(10, 16, 28, 220))
+    gd.text((46, height - 130), "GUIA DE REFERÊNCIA", fill=(255,255,255,255), font=fonts["big"])
+    gd.text((48, height - 74), "VERDE = área da foto • AMARELO = área da notícia", fill=(226,232,240,255), font=fonts["note"])
+    guide_buf = io.BytesIO()
+    guide.save(guide_buf, format="PNG")
+
+    # noticia_exemplo.png
+    example = Image.new("RGBA", (width, height), (15, 23, 32, 255))
+    ex = ImageDraw.Draw(example, "RGBA")
+    # photo placeholder bg
+    px, py, pw, ph = int(photo.get("x") or 0), int(photo.get("y") or 0), int(photo.get("width") or width), int(photo.get("height") or 760)
+    ex.rectangle((px, py, px + pw, py + ph), fill=(30, 41, 59, 255))
+    # simple diagonal pattern
+    step = 60
+    for i in range(-ph, pw, step):
+        ex.line((px + i, py, px + i + ph, py + ph), fill=(51, 65, 85, 180), width=14)
+    ex.rounded_rectangle((px + 48, py + 48, px + pw - 48, py + ph - 48), radius=28, outline=(148, 163, 184, 180), width=4)
+    ex.text((px + 56, py + 58), f"CATEGORIA: {model.get('name', 'Modelo').upper()}", fill=(255,255,255,245), font=fonts["label"])
+    ex.text((px + 56, py + ph - 110), "SUBSTITUA ESTA ÁREA PELA SUA IMAGEM", fill=(255,255,255,230), font=fonts["big"])
+    ex.text((px + 56, py + ph - 64), "Use o overlay.png como base no Photoshop e mantenha o modelo.json", fill=(226,232,240,255), font=fonts["note"])
+    example.alpha_composite(overlay)
+    ex = ImageDraw.Draw(example, "RGBA")
+    sample_title = f"EXEMPLO DE NOTÍCIA DA CATEGORIA {str(model.get('name','')).upper()}"
+    font = fonts["headline"]
+    lines = _wrap_text_for_draw(ex, sample_title, font, int(headline.get("max_width") or 900), int(headline.get("max_lines") or 3))
+    hx, hy = int(headline.get("x") or 90), int(headline.get("y") or 1000)
+    line_height = int(headline.get("line_height") or 78)
+    color = headline.get("color") or "#111827"
+    for idx, line in enumerate(lines):
+        ex.text((hx, hy + idx * line_height), line, fill=color, font=font)
+    ex.rounded_rectangle((24, 24, 380, 88), radius=20, fill=(9, 14, 23, 190))
+    ex.text((42, 42), f"ID: {model.get('id','modelo')}", fill=(255,255,255,255), font=fonts["label"])
+    ex.text((42, 94), "Arquivo de referência para edição", fill=(226,232,240,255), font=fonts["note"])
+    ex_buf = io.BytesIO()
+    example.save(ex_buf, format="PNG")
+
+    # card mini reference maybe duplicate overlay as reference file label image
+    return {
+        "guia_areas.png": guide_buf.getvalue(),
+        "noticia_exemplo.png": ex_buf.getvalue(),
+    }
+
+
 # Tabelas antigas são mantidas para compatibilidade com bancos já existentes.
 class Room(db.Model):
     id = db.Column(db.Integer, primary_key=True)

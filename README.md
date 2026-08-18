@@ -232,3 +232,15 @@ O `modelo.json` continua sendo usado apenas para posição e estilo da manchete.
 ## Ajuste de usabilidade
 
 - A tela de **Fofoca** agora possui um botão **Voltar**, facilitando sair da edição depois de abrir a imagem.
+
+
+## Exportação aprimorada dos modelos de Fofoca
+
+O ZIP exportado pelo admin agora inclui, por categoria/modelo:
+- `overlay.png`
+- `modelo.json`
+- `guia_areas.png`
+- `noticia_exemplo.png`
+- `COMO_EDITAR.txt`
+
+Assim fica mais fácil substituir apenas a imagem da moldura editando o `overlay.png` no Photoshop e reimportando o pacote.

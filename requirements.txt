@@ -4,3 +4,5 @@ gunicorn==23.0.0
 psycopg2-binary==2.9.12
 pywebpush==2.4.0
 cryptography==47.0.0
+
+Pillow==11.3.0
