@@ -244,3 +244,16 @@ O ZIP exportado pelo admin agora inclui, por categoria/modelo:
 - `COMO_EDITAR.txt`
 
 Assim fica mais fácil substituir apenas a imagem da moldura editando o `overlay.png` no Photoshop e reimportando o pacote.
+
+## Mini jogo Sim ou Não
+
+No botão **+** da conversa existe a opção **🎲 Sim ou Não**.
+
+Fluxo:
+1. Um usuário escreve a pergunta.
+2. Clica em **Sortear e lançar**.
+3. O sorteio acontece uma única vez no servidor com chance 50/50.
+4. O resultado é gravado como mensagem da conversa.
+5. Os dois participantes recebem a mesma jogada e veem a animação SIM/NÃO até o resultado final.
+
+O resultado do jogo não pode ser editado depois, preservando a integridade do sorteio. A mensagem do jogo pode ser respondida, visualizada e apagada pelo autor como as demais mensagens.

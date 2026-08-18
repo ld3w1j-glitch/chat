@@ -39,6 +39,7 @@ from pywebpush import WebPushException, webpush
 
 STICKER_PREFIX = "__STICKER__:"
 ATTACHMENT_PREFIX = "__ATTACH__:"
+YESNO_PREFIX = "__YESNO__:"
 MAX_STICKER_BYTES = 1_500_000
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
@@ -696,6 +697,22 @@ def attachment_token_from_message(message_text: str) -> str | None:
     return None
 
 
+def yesno_data_from_message(message_text: str) -> dict | None:
+    if not message_text.startswith(YESNO_PREFIX):
+        return None
+    try:
+        payload = json.loads(message_text[len(YESNO_PREFIX):].strip())
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    question = str(payload.get("question") or "").strip()[:220]
+    result = str(payload.get("result") or "").strip().upper()
+    if not question or result not in {"SIM", "NÃO"}:
+        return None
+    return {"question": question, "result": result}
+
+
 def attachment_label(kind: str, file_name: str = "") -> str:
     base = {
         "image": "🖼️ Imagem",
@@ -746,6 +763,14 @@ def message_preview(message: Message) -> dict:
     token = sticker_token_from_message(state["text"])
     if token:
         return {"id": message.id, "author": message.author, "kind": "sticker", "text": "🖼️ Figurinha"}
+    yesno = yesno_data_from_message(state["text"])
+    if yesno:
+        return {
+            "id": message.id,
+            "author": message.author,
+            "kind": "yesno",
+            "text": f"🎲 {yesno['question']} → {yesno['result']}",
+        }
     attachment_token = attachment_token_from_message(state["text"])
     if attachment_token:
         attachment = Attachment.query.filter_by(token=attachment_token, room_code=message.room_code).first()
@@ -775,10 +800,14 @@ def reply_data_for(message: Message) -> dict | None:
 
 def serialize_message(message: Message) -> dict:
     state = message_effective_state(message)
+    created_at = message.created_at
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
     data = {
         "id": message.id,
         "author": message.author,
         "time": message.created_at.strftime("%H:%M"),
+        "created_ms": int(created_at.timestamp() * 1000),
         "reply": reply_data_for(message),
         "edited": state["edited"],
         "deleted": state["deleted"],
@@ -794,6 +823,16 @@ def serialize_message(message: Message) -> dict:
             "text": "",
             "sticker_token": token,
             "sticker_url": url_for("get_sticker_image", token=token),
+        })
+        return data
+
+    yesno = yesno_data_from_message(state["text"])
+    if yesno:
+        data.update({
+            "kind": "yesno",
+            "text": "",
+            "yesno_question": yesno["question"],
+            "yesno_result": yesno["result"],
         })
         return data
 
@@ -1669,7 +1708,7 @@ def send_message(code):
         reply_target = validate_reply_target(code, data.get("reply_to_id"))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    if message_text.startswith((STICKER_PREFIX, ATTACHMENT_PREFIX)):
+    if message_text.startswith((STICKER_PREFIX, ATTACHMENT_PREFIX, YESNO_PREFIX)):
         message_text = " " + message_text
     message = Message(room_code=code, author=user.username, text=message_text)
     db.session.add(message)
@@ -1725,12 +1764,16 @@ def edit_message(code, message_id):
         return jsonify({"error": "Uma mensagem apagada não pode ser editada."}), 409
     if sticker_token_from_message(state["text"]):
         return jsonify({"error": "Figurinhas não podem ser editadas. Você pode apagá-las e enviar outra."}), 400
+    if attachment_token_from_message(state["text"]):
+        return jsonify({"error": "Anexos não podem ser editados. Você pode apagá-los e enviar outro."}), 400
+    if yesno_data_from_message(state["text"]):
+        return jsonify({"error": "O resultado de um jogo Sim ou Não não pode ser alterado."}), 400
 
     data = request.get_json(silent=True) or {}
     new_text = (data.get("text") or "").strip()[:2000]
     if not new_text:
         return jsonify({"error": "A mensagem não pode ficar vazia."}), 400
-    if new_text.startswith((STICKER_PREFIX, ATTACHMENT_PREFIX)):
+    if new_text.startswith((STICKER_PREFIX, ATTACHMENT_PREFIX, YESNO_PREFIX)):
         new_text = " " + new_text
 
     db.session.add(MessageEvent(message_id=message.id, event_type="edit", text=new_text))
@@ -1848,6 +1891,51 @@ def send_sticker_message(code):
     partner = partner_for(conv, user)
     if partner:
         send_user_push(partner.id, f"{user.full_name} • Nossa Sala", "enviou uma figurinha 🖼️", url_for("conversation", code=code), f"chat-{code}", sender_device_id)
+    return jsonify(serialize_message(message)), 201
+
+
+@app.post("/api/yesno/<code>")
+@login_required
+def send_yesno_game(code):
+    user = current_user()
+    conv = conversation_for_user(code, user)
+    if not conv:
+        return jsonify({"error": "Acesso negado."}), 403
+
+    data = request.get_json(silent=True) or {}
+    question = (data.get("question") or "").strip()[:220]
+    sender_device_id = (data.get("device_id") or "").strip()[:80]
+    if not question:
+        return jsonify({"error": "Digite uma pergunta antes de sortear."}), 400
+
+    try:
+        reply_target = validate_reply_target(code, data.get("reply_to_id"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    # O resultado é escolhido UMA única vez no servidor.
+    # Assim os dois participantes recebem exatamente o mesmo SIM/NÃO.
+    result = secrets.choice(("SIM", "NÃO"))
+    payload = json.dumps({"question": question, "result": result}, ensure_ascii=False, separators=(",", ":"))
+    message = Message(room_code=code, author=user.username, text=f"{YESNO_PREFIX}{payload}")
+    db.session.add(message)
+    db.session.flush()
+    if reply_target:
+        db.session.add(MessageReply(message_id=message.id, replied_to_message_id=reply_target.id))
+    clear_typing_state(conv.id, user.id)
+    user.last_seen = utcnow()
+    db.session.commit()
+
+    partner = partner_for(conv, user)
+    if partner:
+        send_user_push(
+            partner.id,
+            f"{user.full_name} • Sim ou Não",
+            f"{question} → {result}",
+            url_for("conversation", code=code),
+            f"chat-{code}",
+            sender_device_id,
+        )
     return jsonify(serialize_message(message)), 201
 
 

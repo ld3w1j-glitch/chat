@@ -26,6 +26,7 @@
   let fofocaObjectUrl = null;
   let fofocaFrames = [];
   const fofocaOverlayCache = new Map();
+  const yesnoAnimated = new Set();
 
   const messagesEl = $("messages"), form = $("messageForm"), input = $("messageInput");
   const statusBar = $("statusBar"), notifyBtn = $("notifyBtn"), installBtn = $("installBtn");
@@ -45,6 +46,8 @@
   const fofocaComposer = $("fofocaComposer"), fofocaFile = $("fofocaFile"), fofocaFrameSelect = $("fofocaFrameSelect"), fofocaHeadline = $("fofocaHeadline");
   const fofocaCanvas = $("fofocaCanvas"), fofocaCtx = fofocaCanvas?.getContext("2d"), fofocaHint = $("fofocaHint");
   const sendFofocaBtn = $("sendFofocaBtn"), cancelFofocaBtn = $("cancelFofocaBtn"), resetFofocaBtn = $("resetFofocaBtn"), backFofocaBtn = $("backFofocaBtn");
+  const attachYesNoBtn = $("attachYesNoBtn"), yesnoComposer = $("yesnoComposer"), yesnoQuestion = $("yesnoQuestion");
+  const rollYesNoBtn = $("rollYesNoBtn"), cancelYesNoBtn = $("cancelYesNoBtn"), backYesNoBtn = $("backYesNoBtn");
 
   function showPartnerTyping(isTyping) {
     if (!typingIndicator) return;
@@ -115,6 +118,7 @@
   function messageSummary(m) {
     if (m.deleted || m.kind === "deleted") return "Mensagem apagada";
     if (m.kind === "sticker") return "🖼️ Figurinha";
+    if (m.kind === "yesno") return `🎲 ${m.yesno_question || "Sim ou Não"} → ${m.yesno_result || ""}`;
     if (["image","video","document"].includes(m.kind)) return m.text || "📎 Anexo";
     const text = (m.text || "").replace(/\s+/g, " ").trim();
     return text.length > 100 ? text.slice(0, 97) + "..." : text;
@@ -170,7 +174,99 @@
     }
   }
 
+  function hideYesNoComposer(reset=true) {
+    yesnoComposer?.classList.add("hidden");
+    if (reset && yesnoQuestion) yesnoQuestion.value = "";
+  }
+
+  function showYesNoComposer() {
+    hideAttachmentMenu();
+    clearAttachment();
+    hideFofocaComposer(false);
+    toolDrawer.classList.add("hidden");
+    yesnoComposer?.classList.remove("hidden");
+    setTimeout(() => yesnoQuestion?.focus(), 0);
+  }
+
+  function backFromYesNo() {
+    hideYesNoComposer(false);
+    attachmentMenu?.classList.remove("hidden");
+  }
+
+  async function rollYesNo() {
+    const question = (yesnoQuestion?.value || "").trim();
+    if (!question) {
+      status("Digite uma pergunta antes de sortear.", true);
+      yesnoQuestion?.focus();
+      return;
+    }
+    if (editingMessage) {
+      status("Conclua ou cancele a edição antes de iniciar o jogo.", true);
+      return;
+    }
+    const activeReply = replyTo;
+    rollYesNoBtn.disabled = true;
+    rollYesNoBtn.textContent = "🎲 Sorteando...";
+    try {
+      const r = await fetch(`/api/yesno/${ROOM}`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          question,
+          device_id:NossaSala.deviceId,
+          reply_to_id:activeReply?.id || null
+        })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "Não foi possível sortear.");
+      hideYesNoComposer(true);
+      clearReply();
+      addMessage(data);
+      lastId = Math.max(lastId, data.id);
+      await markRead();
+    } catch (err) {
+      status(err.message, true, 6500);
+    } finally {
+      rollYesNoBtn.disabled = false;
+      rollYesNoBtn.textContent = "🎲 Sortear e lançar";
+    }
+  }
+
+  function animateYesNoCard(card, m) {
+    if (!card || yesnoAnimated.has(m.id)) return;
+    yesnoAnimated.add(m.id);
+    const sim = card.querySelector(".yesno-msg-choice.sim");
+    const nao = card.querySelector(".yesno-msg-choice.nao");
+    const result = card.querySelector(".yesno-msg-result");
+    const finalValue = m.yesno_result === "NÃO" ? "NÃO" : "SIM";
+    const age = Math.max(0, Date.now() - Number(m.created_ms || 0));
+    const total = 2300;
+    const remaining = Number(m.created_ms || 0) ? Math.max(0, total - age) : total;
+
+    const settle = () => {
+      sim?.classList.toggle("active", finalValue === "SIM");
+      nao?.classList.toggle("active", finalValue === "NÃO");
+      result.textContent = `Resultado: ${finalValue}`;
+      result.classList.add("settled");
+      card.classList.add("settled");
+    };
+
+    if (remaining <= 120) { settle(); return; }
+    let flip = false;
+    result.textContent = "Sorteando...";
+    const timer = setInterval(() => {
+      flip = !flip;
+      sim?.classList.toggle("active", flip);
+      nao?.classList.toggle("active", !flip);
+    }, 120);
+    setTimeout(() => {
+      clearInterval(timer);
+      settle();
+    }, remaining);
+  }
+
   function showFofocaComposer() {
+    hideYesNoComposer(false);
     hideAttachmentMenu();
     loadFofocaFrames();
     clearAttachment();
@@ -528,6 +624,30 @@
       img.src = m.sticker_url;
       img.alt = `Figurinha enviada por ${m.author}`;
       bubble.appendChild(img);
+    } else if (m.kind === "yesno") {
+      const game = document.createElement("div");
+      game.className = "yesno-message-card";
+      const label = document.createElement("div");
+      label.className = "yesno-msg-label";
+      label.textContent = "🎲 SIM OU NÃO";
+      const question = document.createElement("div");
+      question.className = "yesno-msg-question";
+      question.textContent = m.yesno_question || "Pergunta";
+      const choices = document.createElement("div");
+      choices.className = "yesno-msg-choices";
+      const sim = document.createElement("div");
+      sim.className = "yesno-msg-choice sim";
+      sim.textContent = "SIM";
+      const nao = document.createElement("div");
+      nao.className = "yesno-msg-choice nao";
+      nao.textContent = "NÃO";
+      choices.append(sim, nao);
+      const result = document.createElement("div");
+      result.className = "yesno-msg-result";
+      result.textContent = "Sorteando...";
+      game.append(label, question, choices, result);
+      bubble.appendChild(game);
+      requestAnimationFrame(() => animateYesNoCard(game, m));
     } else if (["image","video","document"].includes(m.kind)) {
       const card = document.createElement("div");
       card.className = "attachment-card";
@@ -803,6 +923,7 @@
   });
   attachImageBtn?.addEventListener("click", () => attachImageInput.click());
   attachFofocaBtn?.addEventListener("click", showFofocaComposer);
+  attachYesNoBtn?.addEventListener("click", showYesNoComposer);
   attachVideoBtn?.addEventListener("click", () => attachVideoInput.click());
   attachDocBtn?.addEventListener("click", () => attachDocInput.click());
   attachImageInput?.addEventListener("change", () => setPendingAttachment(attachImageInput.files?.[0], "image"));
@@ -810,6 +931,10 @@
   attachDocInput?.addEventListener("change", () => setPendingAttachment(attachDocInput.files?.[0], "document"));
   sendAttachmentBtn?.addEventListener("click", sendPendingAttachment);
   cancelFofocaBtn?.addEventListener("click", () => hideFofocaComposer(true));
+  cancelYesNoBtn?.addEventListener("click", () => hideYesNoComposer(true));
+  backYesNoBtn?.addEventListener("click", backFromYesNo);
+  rollYesNoBtn?.addEventListener("click", rollYesNo);
+  yesnoQuestion?.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); rollYesNo(); } });
   backFofocaBtn?.addEventListener("click", backFromFofoca);
   resetFofocaBtn?.addEventListener("click", () => { clearFofoca(true); renderFofoca(); });
   sendFofocaBtn?.addEventListener("click", sendFofocaCard);
@@ -831,6 +956,7 @@
 
   function showTool(tab) {
     hideFofocaComposer(false);
+    hideYesNoComposer(false);
     toolDrawer.classList.remove("hidden");
     document.querySelectorAll(".tool-tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
     emojiPanel.classList.toggle("hidden", tab !== "emoji");
@@ -999,6 +1125,6 @@
   loadMessages();
   loadStickers();
   input.focus();
-  setInterval(loadMessages, 1200);
+  setInterval(loadMessages, 800);
   setInterval(() => NossaSala.ping(), 20000);
 })();
