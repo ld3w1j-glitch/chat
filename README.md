@@ -155,3 +155,14 @@ http://127.0.0.1:5000
 ```
 
 Sem `DATABASE_URL`, o sistema usa SQLite local apenas para desenvolvimento.
+
+
+## Respostas e confirmação de leitura
+
+- Cada mensagem e figurinha possui a ação **Responder**.
+- A resposta guarda uma referência à mensagem original e mostra uma prévia no balão.
+- É possível responder inclusive a uma mensagem que já é uma resposta.
+- Mensagens próprias mostram **✓ Enviada** enquanto ainda não foram abertas pelo outro participante.
+- Quando o outro participante abre a conversa, o estado muda para **✓✓ Visualizada**.
+- A confirmação de leitura só é enviada enquanto a página da conversa está visível, evitando marcar como lida apenas por causa de uma notificação em segundo plano.
+- As relações de resposta e os marcadores de leitura são persistidos no banco de dados e sobrevivem a novos deploys.

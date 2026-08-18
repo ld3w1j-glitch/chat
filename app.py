@@ -184,6 +184,23 @@ class UserPushSubscription(db.Model):
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
 
 
+class MessageReply(db.Model):
+    __table_args__ = (UniqueConstraint("message_id", name="uq_message_reply"),)
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, nullable=False, index=True)
+    replied_to_message_id = db.Column(db.Integer, nullable=False, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class ConversationRead(db.Model):
+    __table_args__ = (UniqueConstraint("conversation_id", "user_id", name="uq_conversation_read_user"),)
+    id = db.Column(db.Integer, primary_key=True)
+    conversation_id = db.Column(db.Integer, nullable=False, index=True)
+    user_id = db.Column(db.Integer, nullable=False, index=True)
+    last_read_message_id = db.Column(db.Integer, nullable=False, default=0)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 with app.app_context():
     db.create_all()
 
@@ -332,25 +349,62 @@ def sticker_token_from_message(message_text: str) -> str | None:
     return None
 
 
-def serialize_message(message: Message) -> dict:
+def message_preview(message: Message) -> dict:
     token = sticker_token_from_message(message.text)
     if token:
-        return {
-            "id": message.id,
-            "author": message.author,
+        return {"id": message.id, "author": message.author, "kind": "sticker", "text": "🖼️ Figurinha"}
+    text_value = (message.text or "").strip().replace("\n", " ")
+    if len(text_value) > 180:
+        text_value = text_value[:177] + "..."
+    return {"id": message.id, "author": message.author, "kind": "text", "text": text_value}
+
+
+def reply_data_for(message: Message) -> dict | None:
+    relation = MessageReply.query.filter_by(message_id=message.id).first()
+    if not relation:
+        return None
+    original = db.session.get(Message, relation.replied_to_message_id)
+    if not original or original.room_code != message.room_code:
+        return None
+    return message_preview(original)
+
+
+def serialize_message(message: Message) -> dict:
+    token = sticker_token_from_message(message.text)
+    data = {
+        "id": message.id,
+        "author": message.author,
+        "time": message.created_at.strftime("%H:%M"),
+        "reply": reply_data_for(message),
+    }
+    if token:
+        data.update({
             "kind": "sticker",
             "text": "",
             "sticker_token": token,
             "sticker_url": url_for("get_sticker_image", token=token),
-            "time": message.created_at.strftime("%H:%M"),
-        }
-    return {
-        "id": message.id,
-        "author": message.author,
-        "kind": "text",
-        "text": message.text,
-        "time": message.created_at.strftime("%H:%M"),
-    }
+        })
+    else:
+        data.update({"kind": "text", "text": message.text})
+    return data
+
+
+def conversation_read_marker(conversation_id: int, user_id: int) -> int:
+    marker = ConversationRead.query.filter_by(conversation_id=conversation_id, user_id=user_id).first()
+    return marker.last_read_message_id if marker else 0
+
+
+def validate_reply_target(room_code: str, reply_to_id) -> Message | None:
+    if reply_to_id in (None, "", 0, "0"):
+        return None
+    try:
+        reply_id = int(reply_to_id)
+    except (TypeError, ValueError):
+        raise ValueError("Mensagem de resposta inválida.")
+    target = db.session.get(Message, reply_id)
+    if not target or target.room_code != room_code:
+        raise ValueError("A mensagem respondida não pertence a esta conversa.")
+    return target
 
 
 def send_user_push(user_id: int, title: str, body: str, target_url: str, tag: str, sender_device_id: str = ""):
@@ -894,11 +948,47 @@ def conversation(code):
 @login_required
 def get_messages(code):
     user = current_user()
-    if not conversation_for_user(code, user):
+    conv = conversation_for_user(code, user)
+    if not conv:
         return jsonify({"error": "Acesso negado."}), 403
     after = request.args.get("after", type=int, default=0)
     messages = Message.query.filter(Message.room_code == code, Message.id > after).order_by(Message.id.asc()).limit(200).all()
-    return jsonify([serialize_message(message) for message in messages])
+    partner = partner_for(conv, user)
+    partner_last_read_id = conversation_read_marker(conv.id, partner.id) if partner else 0
+    return jsonify({
+        "messages": [serialize_message(message) for message in messages],
+        "partner_last_read_id": partner_last_read_id,
+    })
+
+
+@app.post("/api/messages/<code>/read")
+@login_required
+def mark_messages_read(code):
+    user = current_user()
+    conv = conversation_for_user(code, user)
+    if not conv:
+        return jsonify({"error": "Acesso negado."}), 403
+    data = request.get_json(silent=True) or {}
+    try:
+        requested_id = int(data.get("last_read_id") or 0)
+    except (TypeError, ValueError):
+        return jsonify({"error": "Marcador de leitura inválido."}), 400
+    if requested_id <= 0:
+        return jsonify({"status": "ok", "last_read_id": 0})
+    latest = Message.query.filter_by(room_code=code).order_by(Message.id.desc()).first()
+    if not latest:
+        return jsonify({"status": "ok", "last_read_id": 0})
+    safe_id = min(requested_id, latest.id)
+    marker = ConversationRead.query.filter_by(conversation_id=conv.id, user_id=user.id).first()
+    if not marker:
+        marker = ConversationRead(conversation_id=conv.id, user_id=user.id, last_read_message_id=safe_id, updated_at=utcnow())
+        db.session.add(marker)
+    elif safe_id > marker.last_read_message_id:
+        marker.last_read_message_id = safe_id
+        marker.updated_at = utcnow()
+    user.last_seen = utcnow()
+    db.session.commit()
+    return jsonify({"status": "ok", "last_read_id": marker.last_read_message_id})
 
 
 @app.post("/api/messages/<code>")
@@ -913,15 +1003,23 @@ def send_message(code):
     sender_device_id = (data.get("device_id") or "").strip()[:80]
     if not message_text:
         return jsonify({"error": "Mensagem vazia."}), 400
+    try:
+        reply_target = validate_reply_target(code, data.get("reply_to_id"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     if message_text.startswith(STICKER_PREFIX):
         message_text = " " + message_text
     message = Message(room_code=code, author=user.username, text=message_text)
     db.session.add(message)
+    db.session.flush()
+    if reply_target:
+        db.session.add(MessageReply(message_id=message.id, replied_to_message_id=reply_target.id))
     user.last_seen = utcnow()
     db.session.commit()
     partner = partner_for(conv, user)
     if partner:
-        send_user_push(partner.id, f"{user.full_name} • Nossa Sala", message_text, url_for("conversation", code=code), f"chat-{code}", sender_device_id)
+        push_text = f"↩ {message_text}" if reply_target else message_text
+        send_user_push(partner.id, f"{user.full_name} • Nossa Sala", push_text, url_for("conversation", code=code), f"chat-{code}", sender_device_id)
     return jsonify(serialize_message(message)), 201
 
 
@@ -1000,8 +1098,15 @@ def send_sticker_message(code):
     sticker = Sticker.query.filter_by(token=token, room_code=code).first()
     if not sticker:
         return jsonify({"error": "Figurinha inválida."}), 400
+    try:
+        reply_target = validate_reply_target(code, data.get("reply_to_id"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     message = Message(room_code=code, author=user.username, text=f"{STICKER_PREFIX}{sticker.token}")
     db.session.add(message)
+    db.session.flush()
+    if reply_target:
+        db.session.add(MessageReply(message_id=message.id, replied_to_message_id=reply_target.id))
     db.session.commit()
     partner = partner_for(conv, user)
     if partner:
