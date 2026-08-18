@@ -192,6 +192,19 @@ class MessageReply(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
 
 
+class MessageEvent(db.Model):
+    """Histórico append-only de edição/exclusão.
+
+    Usar uma tabela separada evita migrations destrutivas em bancos PostgreSQL
+    que já possuem a tabela Message criada por versões anteriores.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, nullable=False, index=True)
+    event_type = db.Column(db.String(20), nullable=False, index=True)  # edit | delete
+    text = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 class ConversationRead(db.Model):
     __table_args__ = (UniqueConstraint("conversation_id", "user_id", name="uq_conversation_read_user"),)
     id = db.Column(db.Integer, primary_key=True)
@@ -349,11 +362,36 @@ def sticker_token_from_message(message_text: str) -> str | None:
     return None
 
 
+def latest_message_event(message: Message) -> MessageEvent | None:
+    return (
+        MessageEvent.query
+        .filter_by(message_id=message.id)
+        .order_by(MessageEvent.id.desc())
+        .first()
+    )
+
+
+def message_effective_state(message: Message) -> dict:
+    event = latest_message_event(message)
+    deleted = bool(event and event.event_type == "delete")
+    edited = bool(event and event.event_type == "edit")
+    effective_text = event.text if edited else message.text
+    return {
+        "deleted": deleted,
+        "edited": edited,
+        "text": effective_text or "",
+        "event": event,
+    }
+
+
 def message_preview(message: Message) -> dict:
-    token = sticker_token_from_message(message.text)
+    state = message_effective_state(message)
+    if state["deleted"]:
+        return {"id": message.id, "author": message.author, "kind": "deleted", "text": "Mensagem apagada"}
+    token = sticker_token_from_message(state["text"])
     if token:
         return {"id": message.id, "author": message.author, "kind": "sticker", "text": "🖼️ Figurinha"}
-    text_value = (message.text or "").strip().replace("\n", " ")
+    text_value = state["text"].strip().replace("\n", " ")
     if len(text_value) > 180:
         text_value = text_value[:177] + "..."
     return {"id": message.id, "author": message.author, "kind": "text", "text": text_value}
@@ -370,13 +408,20 @@ def reply_data_for(message: Message) -> dict | None:
 
 
 def serialize_message(message: Message) -> dict:
-    token = sticker_token_from_message(message.text)
+    state = message_effective_state(message)
     data = {
         "id": message.id,
         "author": message.author,
         "time": message.created_at.strftime("%H:%M"),
         "reply": reply_data_for(message),
+        "edited": state["edited"],
+        "deleted": state["deleted"],
     }
+    if state["deleted"]:
+        data.update({"kind": "deleted", "text": "Mensagem apagada"})
+        return data
+
+    token = sticker_token_from_message(state["text"])
     if token:
         data.update({
             "kind": "sticker",
@@ -385,7 +430,7 @@ def serialize_message(message: Message) -> dict:
             "sticker_url": url_for("get_sticker_image", token=token),
         })
     else:
-        data.update({"kind": "text", "text": message.text})
+        data.update({"kind": "text", "text": state["text"]})
     return data
 
 
@@ -1021,6 +1066,78 @@ def send_message(code):
         push_text = f"↩ {message_text}" if reply_target else message_text
         send_user_push(partner.id, f"{user.full_name} • Nossa Sala", push_text, url_for("conversation", code=code), f"chat-{code}", sender_device_id)
     return jsonify(serialize_message(message)), 201
+
+
+@app.get("/api/messages/<code>/changes")
+@login_required
+def message_changes(code):
+    user = current_user()
+    if not conversation_for_user(code, user):
+        return jsonify({"error": "Acesso negado."}), 403
+    after_event = request.args.get("after_event", type=int, default=0)
+    events = (
+        db.session.query(MessageEvent)
+        .join(Message, Message.id == MessageEvent.message_id)
+        .filter(Message.room_code == code, MessageEvent.id > after_event)
+        .order_by(MessageEvent.id.asc())
+        .limit(200)
+        .all()
+    )
+    changes = []
+    for event in events:
+        message = db.session.get(Message, event.message_id)
+        if message:
+            changes.append({"event_id": event.id, "message": serialize_message(message)})
+    return jsonify({"changes": changes})
+
+
+@app.patch("/api/messages/<code>/<int:message_id>")
+@login_required
+def edit_message(code, message_id):
+    user = current_user()
+    if not conversation_for_user(code, user):
+        return jsonify({"error": "Acesso negado."}), 403
+    message = db.session.get(Message, message_id)
+    if not message or message.room_code != code:
+        return jsonify({"error": "Mensagem não encontrada."}), 404
+    if message.author != user.username:
+        return jsonify({"error": "Você só pode editar suas próprias mensagens."}), 403
+    state = message_effective_state(message)
+    if state["deleted"]:
+        return jsonify({"error": "Uma mensagem apagada não pode ser editada."}), 409
+    if sticker_token_from_message(state["text"]):
+        return jsonify({"error": "Figurinhas não podem ser editadas. Você pode apagá-las e enviar outra."}), 400
+
+    data = request.get_json(silent=True) or {}
+    new_text = (data.get("text") or "").strip()[:2000]
+    if not new_text:
+        return jsonify({"error": "A mensagem não pode ficar vazia."}), 400
+    if new_text.startswith(STICKER_PREFIX):
+        new_text = " " + new_text
+
+    db.session.add(MessageEvent(message_id=message.id, event_type="edit", text=new_text))
+    user.last_seen = utcnow()
+    db.session.commit()
+    return jsonify(serialize_message(message))
+
+
+@app.delete("/api/messages/<code>/<int:message_id>")
+@login_required
+def delete_message(code, message_id):
+    user = current_user()
+    if not conversation_for_user(code, user):
+        return jsonify({"error": "Acesso negado."}), 403
+    message = db.session.get(Message, message_id)
+    if not message or message.room_code != code:
+        return jsonify({"error": "Mensagem não encontrada."}), 404
+    if message.author != user.username:
+        return jsonify({"error": "Você só pode apagar suas próprias mensagens."}), 403
+    state = message_effective_state(message)
+    if not state["deleted"]:
+        db.session.add(MessageEvent(message_id=message.id, event_type="delete", text=None))
+        user.last_seen = utcnow()
+        db.session.commit()
+    return jsonify(serialize_message(message))
 
 
 @app.get("/api/stickers/<code>")

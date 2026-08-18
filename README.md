@@ -166,3 +166,12 @@ Sem `DATABASE_URL`, o sistema usa SQLite local apenas para desenvolvimento.
 - Quando o outro participante abre a conversa, o estado muda para **✓✓ Visualizada**.
 - A confirmação de leitura só é enviada enquanto a página da conversa está visível, evitando marcar como lida apenas por causa de uma notificação em segundo plano.
 - As relações de resposta e os marcadores de leitura são persistidos no banco de dados e sobrevivem a novos deploys.
+
+## Edição e exclusão de mensagens
+
+- O autor pode editar as próprias mensagens de texto.
+- Mensagens alteradas exibem o marcador **editada**.
+- O autor pode apagar as próprias mensagens, inclusive mensagens de figurinha.
+- A exclusão é lógica: o conteúdo deixa de aparecer e é substituído por **Mensagem apagada**, preservando a ordem da conversa e as respostas vinculadas.
+- Edições e exclusões são sincronizadas automaticamente com o outro participante sem precisar recarregar a página.
+- As alterações ficam persistidas no PostgreSQL pela tabela `message_event`, criada automaticamente no primeiro deploy desta versão.
