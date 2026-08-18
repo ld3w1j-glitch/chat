@@ -42,12 +42,42 @@ def utcnow():
     return datetime.now(timezone.utc)
 
 
+def running_on_railway() -> bool:
+    """Detecta execução real em um deployment do Railway."""
+    return bool(
+        os.getenv("RAILWAY_PROJECT_ID")
+        or os.getenv("RAILWAY_SERVICE_ID")
+        or os.getenv("RAILWAY_DEPLOYMENT_ID")
+    )
+
+
 def get_database_url() -> str:
+    """Usa SQLite apenas localmente e exige PostgreSQL no Railway.
+
+    Isso evita um problema perigoso: sem DATABASE_URL, SQLite funcionava no
+    filesystem efêmero do Railway e os dados desapareciam em um redeploy.
+    """
     url = os.getenv("DATABASE_URL", "").strip()
+
     if not url:
+        if running_on_railway():
+            raise RuntimeError(
+                "DATABASE_URL não configurada. No Railway, conecte o serviço web "
+                "ao PostgreSQL usando uma Reference Variable DATABASE_URL. "
+                "SQLite não é permitido em produção porque o filesystem do "
+                "Railway é efêmero e os dados seriam perdidos no próximo deploy."
+            )
         return "sqlite:///chat.db"
+
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
+
+    if running_on_railway() and not url.startswith(("postgresql://", "postgresql+")):
+        raise RuntimeError(
+            "DATABASE_URL inválida para produção. O Railway deve usar PostgreSQL. "
+            "Configure DATABASE_URL como referência ao DATABASE_URL do serviço Postgres."
+        )
+
     return url
 
 
@@ -212,6 +242,20 @@ class ConversationRead(db.Model):
     user_id = db.Column(db.Integer, nullable=False, index=True)
     last_read_message_id = db.Column(db.Integer, nullable=False, default=0)
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class TypingState(db.Model):
+    """Estado efêmero de digitação por conversa/usuário.
+
+    O timestamp no PostgreSQL permite que o recurso continue correto mesmo se o
+    Railway reiniciar ou se a aplicação passar a usar mais de um processo.
+    Estados antigos expiram automaticamente pela comparação de tempo.
+    """
+    __table_args__ = (UniqueConstraint("conversation_id", "user_id", name="uq_typing_state_user"),)
+    id = db.Column(db.Integer, primary_key=True)
+    conversation_id = db.Column(db.Integer, nullable=False, index=True)
+    user_id = db.Column(db.Integer, nullable=False, index=True)
+    last_typing_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
 
 
 with app.app_context():
@@ -437,6 +481,22 @@ def serialize_message(message: Message) -> dict:
 def conversation_read_marker(conversation_id: int, user_id: int) -> int:
     marker = ConversationRead.query.filter_by(conversation_id=conversation_id, user_id=user_id).first()
     return marker.last_read_message_id if marker else 0
+
+
+def user_is_typing(conversation_id: int, user_id: int, timeout_seconds: float = 4.5) -> bool:
+    state = TypingState.query.filter_by(conversation_id=conversation_id, user_id=user_id).first()
+    if not state or not state.last_typing_at:
+        return False
+    last = state.last_typing_at
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    return last >= utcnow() - timedelta(seconds=timeout_seconds)
+
+
+def clear_typing_state(conversation_id: int, user_id: int) -> None:
+    state = TypingState.query.filter_by(conversation_id=conversation_id, user_id=user_id).first()
+    if state:
+        db.session.delete(state)
 
 
 def validate_reply_target(room_code: str, reply_to_id) -> Message | None:
@@ -1003,7 +1063,34 @@ def get_messages(code):
     return jsonify({
         "messages": [serialize_message(message) for message in messages],
         "partner_last_read_id": partner_last_read_id,
+        "partner_typing": bool(partner and user_is_typing(conv.id, partner.id)),
     })
+
+
+@app.post("/api/typing/<code>")
+@login_required
+def set_typing_state(code):
+    user = current_user()
+    conv = conversation_for_user(code, user)
+    if not conv:
+        return jsonify({"error": "Acesso negado."}), 403
+
+    data = request.get_json(silent=True) or {}
+    typing = bool(data.get("typing"))
+    state = TypingState.query.filter_by(conversation_id=conv.id, user_id=user.id).first()
+
+    if typing:
+        if not state:
+            state = TypingState(conversation_id=conv.id, user_id=user.id, last_typing_at=utcnow())
+            db.session.add(state)
+        else:
+            state.last_typing_at = utcnow()
+        user.last_seen = utcnow()
+    elif state:
+        db.session.delete(state)
+
+    db.session.commit()
+    return jsonify({"status": "ok", "typing": typing})
 
 
 @app.post("/api/messages/<code>/read")
@@ -1059,6 +1146,7 @@ def send_message(code):
     db.session.flush()
     if reply_target:
         db.session.add(MessageReply(message_id=message.id, replied_to_message_id=reply_target.id))
+    clear_typing_state(conv.id, user.id)
     user.last_seen = utcnow()
     db.session.commit()
     partner = partner_for(conv, user)
@@ -1291,7 +1379,12 @@ def service_worker():
 def health():
     try:
         db.session.execute(text("SELECT 1"))
-        return {"status": "ok"}, 200
+        backend = db.engine.url.get_backend_name()
+        return {
+            "status": "ok",
+            "database": backend,
+            "persistent": backend == "postgresql",
+        }, 200
     except Exception:
         db.session.rollback()
         return {"status": "error"}, 503

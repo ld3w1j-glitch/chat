@@ -18,6 +18,9 @@
   let originalImage = null;
   let stickerObjectUrl = null;
   let renderTimer = null;
+  let localTyping = false;
+  let typingStopTimer = null;
+  let lastTypingPingAt = 0;
 
   const messagesEl = $("messages"), form = $("messageForm"), input = $("messageInput");
   const statusBar = $("statusBar"), notifyBtn = $("notifyBtn"), installBtn = $("installBtn");
@@ -27,6 +30,46 @@
   const fileInput = $("stickerFile"), opacityRange = $("opacityRange"), thresholdRange = $("thresholdRange"), softnessRange = $("softnessRange"), removeMode = $("removeMode");
   const replyPreview = $("replyPreview"), replyPreviewAuthor = $("replyPreviewAuthor"), replyPreviewText = $("replyPreviewText");
   const editPreview = $("editPreview"), editPreviewText = $("editPreviewText");
+  const typingIndicator = $("typingIndicator");
+
+  function showPartnerTyping(isTyping) {
+    if (!typingIndicator) return;
+    typingIndicator.classList.toggle("hidden", !isTyping);
+  }
+
+  async function sendTypingState(typing, keepalive=false) {
+    if (typing === localTyping && typing && (Date.now() - lastTypingPingAt) < 1500) return;
+    localTyping = typing;
+    if (typing) lastTypingPingAt = Date.now();
+    try {
+      await fetch(`/api/typing/${ROOM}`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({typing}),
+        keepalive
+      });
+    } catch (_) {}
+  }
+
+  function typingActivity() {
+    if (document.visibilityState !== "visible") return;
+    const hasText = input.value.trim().length > 0;
+    if (!hasText) {
+      if (typingStopTimer) clearTimeout(typingStopTimer);
+      typingStopTimer = null;
+      sendTypingState(false);
+      return;
+    }
+    sendTypingState(true);
+    if (typingStopTimer) clearTimeout(typingStopTimer);
+    typingStopTimer = setTimeout(() => sendTypingState(false), 2200);
+  }
+
+  function stopTyping(keepalive=false) {
+    if (typingStopTimer) clearTimeout(typingStopTimer);
+    typingStopTimer = null;
+    if (localTyping) sendTypingState(false, keepalive);
+  }
 
   function status(message, error=false, timeout=4200) {
     statusBar.textContent = message;
@@ -295,6 +338,7 @@
       if (!r.ok) return;
       const payload = await r.json();
       partnerLastReadId = Number(payload.partner_last_read_id || 0);
+      showPartnerTyping(Boolean(payload.partner_typing));
       const data = Array.isArray(payload) ? payload : (payload.messages || []);
       for (const m of data) {
         addMessage(m);
@@ -313,6 +357,7 @@
     e.preventDefault();
     const text = input.value.trim();
     if (!text) return;
+    stopTyping();
 
     if (editingMessage) {
       const activeEdit = editingMessage;
@@ -361,6 +406,8 @@
     }
   });
 
+  input.addEventListener("input", typingActivity);
+  input.addEventListener("blur", () => stopTyping());
   input.addEventListener("keydown", e => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -371,8 +418,13 @@
     if (document.visibilityState === "visible") {
       loadMessages();
       setTimeout(markRead, 150);
+      if (input.value.trim()) typingActivity();
+    } else {
+      stopTyping(true);
+      showPartnerTyping(false);
     }
   });
+  window.addEventListener("pagehide", () => stopTyping(true));
   window.addEventListener("focus", () => { loadMessages(); setTimeout(markRead, 150); });
 
   EMOJIS.forEach(emoji => {

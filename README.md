@@ -18,7 +18,7 @@ Versão preparada para Railway com PostgreSQL.
 - Emojis, figurinhas, editor de fundo claro/escuro e persistência no PostgreSQL continuam funcionando.
 - PWA instalável e Web Push global por usuário.
 
-## 1. Railway
+\n## IMPORTANTE — persistência no Railway\n\nEsta versão possui uma proteção contra perda de dados.\n\nNo Railway, a aplicação **não inicia mais com SQLite**. Ela exige PostgreSQL. Isso evita que usuários, mensagens, solicitações, leituras, figurinhas, chaves de sessão e demais dados sejam gravados no filesystem temporário do serviço web.\n\nNo Railway, deixe os serviços assim:\n\n```text\nProjeto\n├── web       (este aplicativo)\n└── Postgres  (banco de dados)\n```\n\nNo serviço **web** abra **Variables** e crie uma Reference Variable:\n\n```text\nDATABASE_URL=${{Postgres.DATABASE_URL}}\n```\n\nSe o seu serviço de banco tiver outro nome, use exatamente esse nome no lugar de `Postgres`. A forma mais segura é usar **Add Reference Variable** e selecionar `DATABASE_URL` do banco pelo painel do Railway.\n\nDepois aplique/deploy as alterações.\n\nPara conferir, abra:\n\n```text\nhttps://SEU-DOMINIO/health\n```\n\nEm produção, o resultado esperado é semelhante a:\n\n```json\n{"status":"ok","database":"postgresql","persistent":true}\n```\n\nSe `DATABASE_URL` estiver ausente no Railway, o deploy agora falhará com uma mensagem explicando a configuração necessária, em vez de iniciar silenciosamente com SQLite e perder os dados no próximo deploy.\n\nSQLite continua disponível ao executar localmente no computador para desenvolvimento.\n\n## 1. Railway
 
 Suba todos os arquivos deste projeto para o GitHub e conecte o repositório ao Railway.
 
@@ -175,3 +175,10 @@ Sem `DATABASE_URL`, o sistema usa SQLite local apenas para desenvolvimento.
 - A exclusão é lógica: o conteúdo deixa de aparecer e é substituído por **Mensagem apagada**, preservando a ordem da conversa e as respostas vinculadas.
 - Edições e exclusões são sincronizadas automaticamente com o outro participante sem precisar recarregar a página.
 - As alterações ficam persistidas no PostgreSQL pela tabela `message_event`, criada automaticamente no primeiro deploy desta versão.
+
+## Indicador “digitando…”
+
+- Quando um participante começa a escrever, o outro vê **digitando…** abaixo do nome no cabeçalho da conversa.
+- O estado é renovado enquanto há atividade no campo de mensagem.
+- Ele some automaticamente após alguns segundos sem digitação, ao enviar a mensagem, perder o foco, trocar de aba ou fechar a conversa.
+- O estado usa o PostgreSQL com expiração por timestamp, evitando ficar preso em “digitando…” após quedas de conexão ou reinícios.
