@@ -189,3 +189,18 @@ Sem `DATABASE_URL`, o sistema usa SQLite local apenas para desenvolvimento.
 - Botão **+** ao lado do chat para anexar **documento, imagem ou vídeo**.
 - Os anexos são salvos no PostgreSQL, mantendo a persistência entre deploys no Railway.
 - Limites: imagens até 10 MB, documentos até 10 MB e vídeos até 20 MB.
+
+
+## Persistência automática no Railway
+
+A aplicação agora escolhe o armazenamento nesta ordem:
+
+1. Se existir `DATABASE_URL`, usa PostgreSQL.
+2. Se não existir PostgreSQL, mas houver `RAILWAY_VOLUME_MOUNT_PATH`, usa SQLite dentro do Volume persistente do Railway (`nossa_sala.db`).
+3. Fora do Railway, usa SQLite local apenas para desenvolvimento.
+
+Assim, a aplicação não usa mais SQLite no filesystem efêmero do Railway. O endpoint `/health` informa `storage` e `persistent`.
+
+## Visual neutro
+
+O rosa forte foi removido. A interface usa cinza escuro e azul-acinzentado discreto, sem tema romântico obrigatório.

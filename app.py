@@ -70,33 +70,35 @@ def running_on_railway() -> bool:
 
 
 def get_database_url() -> str:
-    """Usa SQLite apenas localmente e exige PostgreSQL no Railway.
+    """Escolhe armazenamento persistente automaticamente.
 
-    Isso evita um problema perigoso: sem DATABASE_URL, SQLite funcionava no
-    filesystem efêmero do Railway e os dados desapareciam em um redeploy.
+    Prioridade:
+    1. DATABASE_URL -> PostgreSQL (recomendado para produção).
+    2. Railway Volume -> SQLite gravado dentro do volume persistente.
+    3. Execução local -> SQLite local para desenvolvimento.
+
+    Isso evita que o chat volte a usar o filesystem efêmero do Railway.
     """
     url = os.getenv("DATABASE_URL", "").strip()
 
-    if not url:
-        if running_on_railway():
-            raise RuntimeError(
-                "DATABASE_URL não configurada. No Railway, conecte o serviço web "
-                "ao PostgreSQL usando uma Reference Variable DATABASE_URL. "
-                "SQLite não é permitido em produção porque o filesystem do "
-                "Railway é efêmero e os dados seriam perdidos no próximo deploy."
-            )
-        return "sqlite:///chat.db"
+    if url:
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url[len("postgres://"):]
+        return url
 
-    if url.startswith("postgres://"):
-        url = "postgresql://" + url[len("postgres://"):]
+    volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "").strip()
+    if running_on_railway() and volume_path:
+        os.makedirs(volume_path, exist_ok=True)
+        db_path = os.path.join(volume_path, "nossa_sala.db")
+        return "sqlite:///" + db_path
 
-    if running_on_railway() and not url.startswith(("postgresql://", "postgresql+")):
+    if running_on_railway():
         raise RuntimeError(
-            "DATABASE_URL inválida para produção. O Railway deve usar PostgreSQL. "
-            "Configure DATABASE_URL como referência ao DATABASE_URL do serviço Postgres."
+            "Nenhum armazenamento persistente foi encontrado. Configure DATABASE_URL "
+            "para PostgreSQL ou anexe um Railway Volume ao serviço web."
         )
 
-    return url
+    return "sqlite:///chat.db"
 
 
 def b64url_no_padding(raw: bytes) -> str:
@@ -1542,10 +1544,14 @@ def health():
     try:
         db.session.execute(text("SELECT 1"))
         backend = db.engine.url.get_backend_name()
+        volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "").strip()
+        using_volume = bool(backend == "sqlite" and running_on_railway() and volume_path)
+        storage = "postgresql" if backend == "postgresql" else ("railway-volume" if using_volume else "local-sqlite")
         return {
             "status": "ok",
             "database": backend,
-            "persistent": backend == "postgresql",
+            "storage": storage,
+            "persistent": backend == "postgresql" or using_volume,
         }, 200
     except Exception:
         db.session.rollback()

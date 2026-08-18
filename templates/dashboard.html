@@ -2,7 +2,7 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#ff4f7d"><title>Conversas • Nossa Sala</title>
 <link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/static/icons/icon-192.png"><link rel="apple-touch-icon" href="/static/icons/icon-192.png"><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
 <body><main class="app-shell">
-<header class="app-header"><div><strong>Nossa Sala ♥</strong><div class="room-code">{{ user.full_name }} • @{{ user.username }}</div></div><div class="header-actions"><button id="installBtn" class="secondary compact hidden" type="button">📲 Instalar</button><button id="notifyBtn" class="secondary compact" type="button">🔔 Notificações</button><form method="post" action="{{ url_for('logout') }}"><button class="secondary compact" type="submit">Sair</button></form></div></header>
+<header class="app-header"><div><strong>Nossa Sala</strong><div class="room-code">{{ user.full_name }} • @{{ user.username }}</div></div><div class="header-actions"><button id="installBtn" class="secondary compact hidden" type="button">📲 Instalar</button><button id="notifyBtn" class="secondary compact" type="button">🔔 Notificações</button><form method="post" action="{{ url_for('logout') }}"><button class="secondary compact" type="submit">Sair</button></form></div></header>
 <div id="statusBar" class="status-bar hidden" role="status"></div>
 <section id="invitesBox" class="invites-wrap hidden"></section>
 <div class="dashboard-grid">
