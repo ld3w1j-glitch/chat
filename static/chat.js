@@ -44,7 +44,7 @@
   const attachFofocaBtn = $("attachFofocaBtn");
   const fofocaComposer = $("fofocaComposer"), fofocaFile = $("fofocaFile"), fofocaFrameSelect = $("fofocaFrameSelect"), fofocaHeadline = $("fofocaHeadline");
   const fofocaCanvas = $("fofocaCanvas"), fofocaCtx = fofocaCanvas?.getContext("2d"), fofocaHint = $("fofocaHint");
-  const sendFofocaBtn = $("sendFofocaBtn"), cancelFofocaBtn = $("cancelFofocaBtn"), resetFofocaBtn = $("resetFofocaBtn");
+  const sendFofocaBtn = $("sendFofocaBtn"), cancelFofocaBtn = $("cancelFofocaBtn"), resetFofocaBtn = $("resetFofocaBtn"), backFofocaBtn = $("backFofocaBtn");
 
   function showPartnerTyping(isTyping) {
     if (!typingIndicator) return;
@@ -193,6 +193,12 @@
   function hideFofocaComposer(resetFields=true) {
     fofocaComposer?.classList.add("hidden");
     if (resetFields) clearFofoca(true);
+  }
+
+  function backFromFofoca() {
+    hideFofocaComposer(false);
+    hideAttachmentMenu();
+    attachmentMenu?.classList.remove("hidden");
   }
 
   function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
@@ -804,6 +810,7 @@
   attachDocInput?.addEventListener("change", () => setPendingAttachment(attachDocInput.files?.[0], "document"));
   sendAttachmentBtn?.addEventListener("click", sendPendingAttachment);
   cancelFofocaBtn?.addEventListener("click", () => hideFofocaComposer(true));
+  backFofocaBtn?.addEventListener("click", backFromFofoca);
   resetFofocaBtn?.addEventListener("click", () => { clearFofoca(true); renderFofoca(); });
   sendFofocaBtn?.addEventListener("click", sendFofocaCard);
   fofocaFrameSelect?.addEventListener("change", renderFofoca);

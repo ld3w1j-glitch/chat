@@ -33,3 +33,6 @@ button,.link-button{border:0;border-radius:13px;padding:12px 16px;font-weight:70
 
 /* Administração dos modelos de fofoca */
 .frame-admin-grid{display:grid;grid-template-columns:minmax(280px,.8fr) minmax(320px,1.2fr);gap:16px}.frame-admin-actions{display:flex;flex-direction:column;gap:12px}.frame-import-form{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}.frame-import-form label{display:flex;flex:1;min-width:220px;flex-direction:column;gap:7px;color:var(--muted);font-size:13px}.frame-import-form input[type="file"]{padding:10px;border-radius:12px;border:1px solid var(--border);background:var(--panel2);color:var(--text)}.frame-model-list{display:flex;flex-direction:column;gap:7px}.frame-model-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--panel2)}.frame-model-row>div{display:flex;flex-direction:column;gap:2px}.frame-model-row span{font-size:11px;color:var(--muted)}@media(max-width:780px){.frame-admin-grid{grid-template-columns:1fr}}
+
+.fofoca-actions{display:grid;grid-template-columns:1fr 1fr 1.25fr;gap:10px}
+@media(max-width:640px){.fofoca-actions{grid-template-columns:1fr}}

@@ -227,3 +227,8 @@ minha_moldura/
 
 Edite o `overlay.png` no Photoshop.
 O `modelo.json` continua sendo usado apenas para posição e estilo da manchete.
+
+
+## Ajuste de usabilidade
+
+- A tela de **Fofoca** agora possui um botão **Voltar**, facilitando sair da edição depois de abrir a imagem.
