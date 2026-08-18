@@ -22,6 +22,8 @@
   let typingStopTimer = null;
   let lastTypingPingAt = 0;
   let pendingAttachment = null;
+  let fofocaImage = null;
+  let fofocaObjectUrl = null;
 
   const messagesEl = $("messages"), form = $("messageForm"), input = $("messageInput");
   const statusBar = $("statusBar"), notifyBtn = $("notifyBtn"), installBtn = $("installBtn");
@@ -37,6 +39,10 @@
   const attachImageInput = $("attachImageInput"), attachVideoInput = $("attachVideoInput"), attachDocInput = $("attachDocInput");
   const attachmentPreview = $("attachmentPreview"), attachmentPreviewTitle = $("attachmentPreviewTitle"), attachmentPreviewText = $("attachmentPreviewText");
   const sendAttachmentBtn = $("sendAttachmentBtn"), cancelAttachmentBtn = $("cancelAttachmentBtn");
+  const attachFofocaBtn = $("attachFofocaBtn");
+  const fofocaComposer = $("fofocaComposer"), fofocaFile = $("fofocaFile"), fofocaFrameSelect = $("fofocaFrameSelect"), fofocaHeadline = $("fofocaHeadline");
+  const fofocaCanvas = $("fofocaCanvas"), fofocaCtx = fofocaCanvas?.getContext("2d"), fofocaHint = $("fofocaHint");
+  const sendFofocaBtn = $("sendFofocaBtn"), cancelFofocaBtn = $("cancelFofocaBtn"), resetFofocaBtn = $("resetFofocaBtn");
 
   function showPartnerTyping(isTyping) {
     if (!typingIndicator) return;
@@ -159,6 +165,160 @@
     } finally {
       sendAttachmentBtn.disabled = false;
       sendAttachmentBtn.textContent = "Enviar anexo";
+    }
+  }
+
+  function showFofocaComposer() {
+    hideAttachmentMenu();
+    clearAttachment();
+    toolDrawer.classList.add("hidden");
+    fofocaComposer?.classList.remove("hidden");
+  }
+
+  function clearFofoca(resetFields=true) {
+    fofocaImage = null;
+    if (fofocaObjectUrl) { URL.revokeObjectURL(fofocaObjectUrl); fofocaObjectUrl = null; }
+    if (fofocaCtx) fofocaCtx.clearRect(0, 0, fofocaCanvas.width, fofocaCanvas.height);
+    if (fofocaHint) fofocaHint.classList.remove("hidden");
+    if (resetFields) {
+      if (fofocaFile) fofocaFile.value = "";
+      if (fofocaHeadline) fofocaHeadline.value = "";
+      if (fofocaFrameSelect) fofocaFrameSelect.value = "plantao";
+    }
+  }
+
+  function hideFofocaComposer(resetFields=true) {
+    fofocaComposer?.classList.add("hidden");
+    if (resetFields) clearFofoca(true);
+  }
+
+  function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight, maxLines) {
+    const words = String(text || "").trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return;
+    const lines = [];
+    let line = words.shift();
+    for (const word of words) {
+      const test = line + " " + word;
+      if (ctx.measureText(test).width <= maxWidth) line = test;
+      else { lines.push(line); line = word; }
+    }
+    if (line) lines.push(line);
+    const finalLines = lines.slice(0, maxLines);
+    if (lines.length > maxLines) {
+      let last = finalLines[maxLines - 1];
+      while (ctx.measureText(last + "…").width > maxWidth && last.length > 1) last = last.slice(0, -1);
+      finalLines[maxLines - 1] = last + "…";
+    }
+    finalLines.forEach((ln, i) => ctx.fillText(ln, x, y + i * lineHeight));
+  }
+
+  function getFofocaTheme(id) {
+    const themes = {
+      plantao: {banner:"#b3261e", badge:"#ffdfdf", badgeText:"#7e1611", headlineBg:"#ffffff", headlineText:"#111827", kicker:"PLANTÃO DA FOFOCA"},
+      manchete: {banner:"#1f3a5f", badge:"#d9e7ff", badgeText:"#163152", headlineBg:"#f8fafc", headlineText:"#0f172a", kicker:"MANCHETE DO DIA"},
+      urgente: {banner:"#8a5a10", badge:"#fff2d6", badgeText:"#704300", headlineBg:"#fffaf0", headlineText:"#18181b", kicker:"URGENTE"},
+    };
+    return themes[id] || themes.plantao;
+  }
+
+  function renderFofoca() {
+    if (!fofocaCtx || !fofocaCanvas) return;
+    const w = fofocaCanvas.width, h = fofocaCanvas.height;
+    const theme = getFofocaTheme(fofocaFrameSelect?.value || "plantao");
+    const headline = (fofocaHeadline?.value || "A sua notícia aparece aqui").trim() || "A sua notícia aparece aqui";
+    fofocaCtx.clearRect(0, 0, w, h);
+    fofocaCtx.fillStyle = "#0f1720";
+    fofocaCtx.fillRect(0, 0, w, h);
+
+    if (fofocaImage) {
+      const iw = fofocaImage.naturalWidth || fofocaImage.width;
+      const ih = fofocaImage.naturalHeight || fofocaImage.height;
+      const targetH = 760;
+      const scale = Math.max(w / iw, targetH / ih);
+      const dw = iw * scale, dh = ih * scale;
+      const dx = (w - dw) / 2, dy = (targetH - dh) / 2;
+      fofocaCtx.drawImage(fofocaImage, dx, dy, dw, dh);
+      const g = fofocaCtx.createLinearGradient(0, 500, 0, 820);
+      g.addColorStop(0, 'rgba(15,23,32,0)');
+      g.addColorStop(1, 'rgba(15,23,32,0.55)');
+      fofocaCtx.fillStyle = g;
+      fofocaCtx.fillRect(0, 500, w, 320);
+      if (fofocaHint) fofocaHint.classList.add("hidden");
+    } else {
+      fofocaCtx.fillStyle = '#1a2330';
+      fofocaCtx.fillRect(0, 0, w, 760);
+      fofocaCtx.fillStyle = 'rgba(255,255,255,.22)';
+      fofocaCtx.font = '600 44px Inter, Arial, sans-serif';
+      fofocaCtx.textAlign = 'center';
+      fofocaCtx.fillText('Escolha uma imagem', w / 2, 380);
+      if (fofocaHint) fofocaHint.classList.remove("hidden");
+    }
+
+    fofocaCtx.fillStyle = theme.banner;
+    fofocaCtx.fillRect(0, 0, w, 118);
+    fofocaCtx.fillStyle = '#ffffff';
+    fofocaCtx.font = '700 58px Inter, Arial, sans-serif';
+    fofocaCtx.textAlign = 'left';
+    fofocaCtx.fillText('FOFOCA', 64, 78);
+    fofocaCtx.font = '600 28px Inter, Arial, sans-serif';
+    fofocaCtx.globalAlpha = .9;
+    fofocaCtx.fillText(theme.kicker, 66, 106);
+    fofocaCtx.globalAlpha = 1;
+
+    const cardX = 52, cardY = 790, cardW = w - 104, cardH = 470;
+    fofocaCtx.save();
+    fofocaCtx.shadowColor = 'rgba(0,0,0,.28)';
+    fofocaCtx.shadowBlur = 26;
+    fofocaCtx.fillStyle = theme.headlineBg;
+    fofocaCtx.beginPath();
+    fofocaCtx.roundRect(cardX, cardY, cardW, cardH, 34);
+    fofocaCtx.fill();
+    fofocaCtx.restore();
+
+    fofocaCtx.fillStyle = theme.badge;
+    fofocaCtx.beginPath();
+    fofocaCtx.roundRect(cardX + 34, cardY + 28, 280, 56, 20);
+    fofocaCtx.fill();
+    fofocaCtx.fillStyle = theme.badgeText;
+    fofocaCtx.font = '700 28px Inter, Arial, sans-serif';
+    fofocaCtx.fillText('NOTÍCIA', cardX + 62, cardY + 64);
+
+    fofocaCtx.fillStyle = theme.headlineText;
+    fofocaCtx.font = '800 70px Inter, Arial, sans-serif';
+    fofocaCtx.textAlign = 'left';
+    wrapCanvasText(fofocaCtx, headline.toUpperCase(), cardX + 42, cardY + 150, cardW - 84, 84, 4);
+
+    fofocaCtx.fillStyle = '#475569';
+    fofocaCtx.font = '500 24px Inter, Arial, sans-serif';
+    fofocaCtx.fillText('Compartilhado no Nossa Sala', cardX + 44, cardY + cardH - 42);
+  }
+
+  async function sendFofocaCard() {
+    if (!fofocaImage) { status('Escolha uma imagem para a fofoca.', true); return; }
+    renderFofoca();
+    sendFofocaBtn.disabled = true;
+    sendFofocaBtn.textContent = 'Gerando...';
+    try {
+      const blob = await new Promise(resolve => fofocaCanvas.toBlob(resolve, 'image/png', 0.95));
+      if (!blob) throw new Error('Não foi possível gerar a imagem da fofoca.');
+      const fd = new FormData();
+      fd.append('file', new File([blob], `fofoca-${Date.now()}.png`, {type:'image/png'}));
+      fd.append('device_id', NossaSala.deviceId || '');
+      if (replyTo?.id) fd.append('reply_to_id', String(replyTo.id));
+      const r = await fetch(`/api/attachments/${ROOM}`, {method:'POST', body:fd});
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Falha ao enviar fofoca.');
+      addMessage(data);
+      lastId = Math.max(lastId, data.id);
+      clearReply();
+      hideFofocaComposer(true);
+      await markRead();
+      status('Fofoca enviada.');
+    } catch (err) {
+      status(err.message, true, 6500);
+    } finally {
+      sendFofocaBtn.disabled = false;
+      sendFofocaBtn.textContent = 'Gerar e enviar';
     }
   }
 
@@ -549,16 +709,34 @@
     attachmentMenu.classList.toggle("hidden");
   });
   attachImageBtn?.addEventListener("click", () => attachImageInput.click());
+  attachFofocaBtn?.addEventListener("click", showFofocaComposer);
   attachVideoBtn?.addEventListener("click", () => attachVideoInput.click());
   attachDocBtn?.addEventListener("click", () => attachDocInput.click());
   attachImageInput?.addEventListener("change", () => setPendingAttachment(attachImageInput.files?.[0], "image"));
   attachVideoInput?.addEventListener("change", () => setPendingAttachment(attachVideoInput.files?.[0], "video"));
   attachDocInput?.addEventListener("change", () => setPendingAttachment(attachDocInput.files?.[0], "document"));
   sendAttachmentBtn?.addEventListener("click", sendPendingAttachment);
+  cancelFofocaBtn?.addEventListener("click", () => hideFofocaComposer(true));
+  resetFofocaBtn?.addEventListener("click", () => { clearFofoca(true); renderFofoca(); });
+  sendFofocaBtn?.addEventListener("click", sendFofocaCard);
+  fofocaFrameSelect?.addEventListener("change", renderFofoca);
+  fofocaHeadline?.addEventListener("input", renderFofoca);
+  fofocaFile?.addEventListener("change", () => {
+    const file = fofocaFile.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) { status("Escolha uma imagem para a fofoca.", true); return; }
+    if (fofocaObjectUrl) URL.revokeObjectURL(fofocaObjectUrl);
+    fofocaObjectUrl = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { fofocaImage = img; renderFofoca(); };
+    img.onerror = () => status("Não consegui abrir a imagem da fofoca.", true);
+    img.src = fofocaObjectUrl;
+  });
   cancelAttachmentBtn?.addEventListener("click", clearAttachment);
   document.addEventListener("click", e => { if (!e.target.closest(".attach-menu-wrap")) hideAttachmentMenu(); });
 
   function showTool(tab) {
+    hideFofocaComposer(false);
     toolDrawer.classList.remove("hidden");
     document.querySelectorAll(".tool-tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
     emojiPanel.classList.toggle("hidden", tab !== "emoji");
@@ -566,6 +744,7 @@
     if (tab === "stickers") loadStickers();
   }
   $("emojiBtn").addEventListener("click", () => showTool("emoji"));
+  renderFofoca();
   $("stickerBtn").addEventListener("click", () => showTool("stickers"));
   document.querySelectorAll(".tool-tab").forEach(btn => btn.addEventListener("click", () => showTool(btn.dataset.tab)));
   $("closeToolsBtn").addEventListener("click", () => toolDrawer.classList.add("hidden"));
