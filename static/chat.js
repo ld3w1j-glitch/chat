@@ -107,6 +107,7 @@
   });
   NossaSala.setupInstallButton(installBtn, msg => status(msg, false, 8000));
   refreshNotify();
+  NossaSala.syncPushIfGranted().then(ok => { if (ok) refreshNotify(); });
 
   function formatBytes(bytes) {
     const n = Number(bytes || 0);

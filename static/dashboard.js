@@ -28,6 +28,7 @@
   });
   NossaSala.setupInstallButton(installBtn, message => status(message, false, 8000));
   refreshNotifyLabel();
+  NossaSala.syncPushIfGranted().then(ok => { if (ok) refreshNotifyLabel(); });
 
   async function callUser(id, button) {
     button.disabled = true;
@@ -41,6 +42,11 @@
     finally { button.disabled = false; button.textContent = "Chamar"; }
   }
 
+  function avatarMarkup(name, photoUrl) {
+    if (photoUrl) return `<div class="avatar has-photo"><img src="${escapeHtml(photoUrl)}" alt="Foto de ${escapeHtml(name)}"></div>`;
+    return `<div class="avatar">${escapeHtml((name || "?").slice(0,1).toUpperCase())}</div>`;
+  }
+
   function renderOnline(users) {
     onlineList.innerHTML = "";
     if (!users.length) {
@@ -50,7 +56,7 @@
     for (const user of users) {
       const row = document.createElement("div");
       row.className = "person-row";
-      row.innerHTML = `<div class="avatar">${user.full_name.slice(0,1).toUpperCase()}</div><div class="person-main"><strong>${escapeHtml(user.full_name)}</strong><span>@${escapeHtml(user.username)}</span></div><span class="online-dot" title="Online"></span>`;
+      row.innerHTML = `${avatarMarkup(user.full_name, user.photo_url)}<div class="person-main"><strong>${escapeHtml(user.full_name)}</strong><span>@${escapeHtml(user.username)}</span></div><span class="online-dot" title="Online"></span>`;
       const btn = document.createElement("button");
       btn.className = "primary small-btn";
       btn.type = "button";
@@ -71,7 +77,7 @@
       const a = document.createElement("a");
       a.className = "conversation-row";
       a.href = `/conversation/${conv.code}`;
-      a.innerHTML = `<div class="avatar">${conv.partner_name.slice(0,1).toUpperCase()}</div><div class="person-main"><strong>${escapeHtml(conv.partner_name)}</strong><span>${escapeHtml(conv.last_message)}</span></div><span class="presence ${conv.online ? 'online' : ''}">${conv.online ? 'online' : 'offline'}</span>`;
+      a.innerHTML = `${avatarMarkup(conv.partner_name, conv.partner_photo_url)}<div class="person-main"><strong>${escapeHtml(conv.partner_name)}</strong><span>${escapeHtml(conv.last_message)}</span></div><span class="presence ${conv.online ? 'online' : ''}">${conv.online ? 'online' : 'offline'}</span>`;
       conversationsList.appendChild(a);
     }
   }
@@ -82,7 +88,7 @@
     for (const invite of invites) {
       const item = document.createElement("div");
       item.className = "invite-card";
-      item.innerHTML = `<div><strong>📞 ${escapeHtml(invite.sender_name)} está chamando</strong><div class="muted">Aceite para abrir a conversa privada.</div></div>`;
+      item.innerHTML = `<div class="invite-person">${avatarMarkup(invite.sender_name, invite.sender_photo_url)}<div><strong>📞 ${escapeHtml(invite.sender_name)} está chamando</strong><div class="muted">Aceite para abrir a conversa privada.</div></div></div>`;
       const actions = document.createElement("div");
       actions.className = "invite-actions";
       const accept = document.createElement("button");

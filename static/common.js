@@ -20,7 +20,16 @@ window.NossaSala = (() => {
     return Uint8Array.from([...raw].map(ch => ch.charCodeAt(0)));
   }
 
-  async function enablePush() {
+  function buffersEqual(a, b) {
+    if (!a || !b) return false;
+    const aa = new Uint8Array(a);
+    const bb = b instanceof Uint8Array ? b : new Uint8Array(b);
+    if (aa.length !== bb.length) return false;
+    for (let i = 0; i < aa.length; i++) if (aa[i] !== bb[i]) return false;
+    return true;
+  }
+
+  async function ensurePushSubscription({askPermission=true} = {}) {
     if (!("Notification" in window) || !("PushManager" in window)) {
       throw new Error("Este navegador não suporta notificações Web Push.");
     }
@@ -29,27 +38,62 @@ window.NossaSala = (() => {
     if (isIOS && !standalone) {
       throw new Error("No iPhone/iPad, adicione o site à Tela de Início e abra pelo ícone antes de ativar notificações.");
     }
-    const permission = await Notification.requestPermission();
-    if (permission !== "granted") throw new Error("A permissão de notificação não foi concedida.");
+
+    let permission = Notification.permission;
+    if (permission === "default" && askPermission) permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      if (!askPermission) return false;
+      throw new Error(permission === "denied" ? "As notificações estão bloqueadas nas configurações do navegador." : "A permissão de notificação não foi concedida.");
+    }
 
     const registration = await registerServiceWorker();
     const keyResponse = await fetch("/api/push/public-key", {cache: "no-store"});
+    if (!keyResponse.ok) throw new Error("Não consegui obter a chave de notificações do servidor.");
     const keyData = await keyResponse.json();
+    const desiredKey = urlBase64ToUint8Array(keyData.publicKey);
     let subscription = await registration.pushManager.getSubscription();
+
+    // Se o banco/VAPID mudou em algum deploy, uma inscrição antiga pode continuar
+    // no navegador, mas deixa de aceitar os pushes do servidor. Nesse caso recriamos.
+    if (subscription && !buffersEqual(subscription.options?.applicationServerKey, desiredKey)) {
+      try {
+        await fetch("/api/push/unsubscribe", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({endpoint: subscription.endpoint})
+        });
+      } catch (_) {}
+      try { await subscription.unsubscribe(); } catch (_) {}
+      subscription = null;
+    }
+
     if (!subscription) {
       subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(keyData.publicKey)
+        applicationServerKey: desiredKey
       });
     }
+
     const response = await fetch("/api/push/subscribe", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({device_id: deviceId, subscription: subscription.toJSON()})
     });
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || "Não consegui ativar as notificações.");
+    if (!response.ok) throw new Error(data.error || "Não consegui registrar este aparelho para notificações.");
     return true;
+  }
+
+  async function enablePush() {
+    return ensurePushSubscription({askPermission:true});
+  }
+
+  async function syncPushIfGranted() {
+    try {
+      return await ensurePushSubscription({askPermission:false});
+    } catch (_) {
+      return false;
+    }
   }
 
   function notificationLabel() {
@@ -98,5 +142,5 @@ window.NossaSala = (() => {
 
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 
-  return {deviceId, enablePush, notificationLabel, setupInstallButton, ping};
+  return {deviceId, enablePush, syncPushIfGranted, notificationLabel, setupInstallButton, ping};
 })();

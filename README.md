@@ -257,3 +257,26 @@ Fluxo:
 5. Os dois participantes recebem a mesma jogada e veem a animação SIM/NÃO até o resultado final.
 
 O resultado do jogo não pode ser editado depois, preservando a integridade do sorteio. A mensagem do jogo pode ser respondida, visualizada e apagada pelo autor como as demais mensagens.
+
+## Meu Perfil
+
+Cada usuário possui a rota `/perfil`, onde pode:
+- enviar/trocar/remover a foto de perfil;
+- alterar o nome de exibição;
+- alterar a própria senha informando a senha atual.
+
+O nome de usuário (`@usuario`) permanece fixo para preservar o vínculo das conversas e mensagens antigas.
+
+As fotos são recortadas para 512x512 e armazenadas em WebP na base persistente, através da tabela `UserProfile`.
+
+## Notificações de mensagens
+
+A versão reforça o Web Push:
+- mensagens de texto continuam disparando push para o outro usuário;
+- se o navegador tiver uma inscrição antiga ligada a outra chave VAPID, a inscrição é recriada automaticamente;
+- quando a permissão já está concedida, Dashboard e Chat sincronizam novamente o aparelho com o servidor;
+- em `/perfil` há `Ativar / reparar` e `Enviar notificação de teste`;
+- `/api/push/status` informa quantos aparelhos estão registrados;
+- `/api/push/test` envia um push de diagnóstico para o próprio usuário.
+
+Cada aparelho precisa conceder permissão para notificações pelo menos uma vez. No iPhone/iPad, o PWA precisa ser adicionado à Tela de Início e aberto pelo ícone para Web Push.

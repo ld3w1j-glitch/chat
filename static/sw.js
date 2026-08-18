@@ -1,4 +1,4 @@
-const CACHE = "nossa-sala-v6";
+const CACHE = "nossa-sala-v8-profile-push";
 const CORE = ["/", "/manifest.webmanifest", "/static/style.css", "/static/common.js", "/static/chat.js", "/static/icons/icon-192.png", "/static/icons/icon-512.png"];
 
 self.addEventListener("install", event => {
@@ -49,6 +49,8 @@ self.addEventListener("push", event => {
     badge: "/static/icons/icon-192.png",
     tag: data.tag || "nossa-sala",
     renotify: true,
+    timestamp: Date.now(),
+    vibrate: [120, 60, 120],
     data: {url: data.url || "/"}
   };
 

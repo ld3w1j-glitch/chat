@@ -498,6 +498,16 @@ class UserPushSubscription(db.Model):
     updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
 
 
+class UserProfile(db.Model):
+    __table_args__ = (UniqueConstraint("user_id", name="uq_user_profile_user"),)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=False, unique=True, index=True)
+    photo_mime = db.Column(db.String(80), nullable=False, default="")
+    photo_data = db.Column(db.LargeBinary, nullable=True)
+    photo_updated_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 class MessageReply(db.Model):
     __table_args__ = (UniqueConstraint("message_id", name="uq_message_reply"),)
     id = db.Column(db.Integer, primary_key=True)
@@ -889,22 +899,61 @@ def validate_reply_target(room_code: str, reply_to_id) -> Message | None:
     return target
 
 
+def profile_record(user_id: int) -> UserProfile | None:
+    return UserProfile.query.filter_by(user_id=user_id).first()
+
+
+def user_photo_url(user: User | None) -> str | None:
+    if not user:
+        return None
+    profile = profile_record(user.id)
+    if not profile or not profile.photo_data:
+        return None
+    version = 0
+    if profile.photo_updated_at:
+        dt = profile.photo_updated_at
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        version = int(dt.timestamp())
+    return url_for("profile_photo", user_id=user.id, v=version)
+
+
+def process_profile_photo(raw: bytes) -> tuple[bytes, str]:
+    if not raw:
+        raise ValueError("A imagem está vazia.")
+    if len(raw) > 5 * 1024 * 1024:
+        raise ValueError("A foto de perfil deve ter no máximo 5 MB.")
+    try:
+        from PIL import Image, ImageOps, UnidentifiedImageError
+        source = Image.open(io.BytesIO(raw))
+        source = ImageOps.exif_transpose(source)
+        source = source.convert("RGB")
+        source = ImageOps.fit(source, (512, 512), method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+        output = io.BytesIO()
+        source.save(output, format="WEBP", quality=86, method=6)
+        return output.getvalue(), "image/webp"
+    except Exception as exc:
+        raise ValueError("Não consegui processar essa imagem. Use JPG, PNG ou WebP.") from exc
+
+
 def send_user_push(user_id: int, title: str, body: str, target_url: str, tag: str, sender_device_id: str = ""):
     try:
         _public, private_key = get_or_create_vapid_keys()
     except Exception:
         db.session.rollback()
-        return
+        return {"sent": 0, "failed": 1, "subscriptions": 0}
 
     subscriptions = UserPushSubscription.query.filter_by(user_id=user_id).all()
     if not subscriptions:
-        return
+        return {"sent": 0, "failed": 0, "subscriptions": 0}
 
     payload = json.dumps(
         {"title": title, "body": body[:180], "url": target_url, "tag": tag},
         ensure_ascii=False,
     )
     dead_ids = []
+    sent = 0
+    failed = 0
     subject = os.getenv("VAPID_SUBJECT", "mailto:noreply@example.com")
 
     for subscription in subscriptions:
@@ -921,18 +970,22 @@ def send_user_push(user_id: int, title: str, body: str, target_url: str, tag: st
                 vapid_private_key=private_key,
                 vapid_claims={"sub": subject},
                 ttl=300,
-                timeout=6,
+                timeout=8,
             )
+            sent += 1
         except WebPushException as exc:
+            failed += 1
             response = getattr(exc, "response", None)
-            if response is not None and getattr(response, "status_code", None) in (404, 410):
+            status_code = getattr(response, "status_code", None) if response is not None else None
+            if status_code in (404, 410):
                 dead_ids.append(subscription.id)
         except Exception:
-            continue
+            failed += 1
 
     if dead_ids:
         UserPushSubscription.query.filter(UserPushSubscription.id.in_(dead_ids)).delete(synchronize_session=False)
         db.session.commit()
+    return {"sent": sent, "failed": failed, "subscriptions": len(subscriptions)}
 
 
 def whatsapp_configured() -> bool:
@@ -1139,12 +1192,87 @@ def request_account():
     return render_template("request_account.html")
 
 
+@app.route("/perfil", methods=["GET", "POST"])
+@login_required
+def profile_settings():
+    user = current_user()
+    if request.method == "POST":
+        action = (request.form.get("action") or "profile").strip()
+        if action == "profile":
+            full_name = (request.form.get("full_name") or "").strip()[:120]
+            if len(full_name) < 2:
+                flash("Informe um nome com pelo menos 2 caracteres.", "error")
+                return redirect(url_for("profile_settings"))
+            user.full_name = full_name
+            profile = profile_record(user.id)
+            remove_photo = request.form.get("remove_photo") == "1"
+            upload = request.files.get("photo")
+            if remove_photo:
+                if profile:
+                    profile.photo_data = None
+                    profile.photo_mime = ""
+                    profile.photo_updated_at = utcnow()
+                    profile.updated_at = utcnow()
+            elif upload and upload.filename:
+                raw = upload.read(5 * 1024 * 1024 + 1)
+                try:
+                    photo_data, photo_mime = process_profile_photo(raw)
+                except ValueError as exc:
+                    flash(str(exc), "error")
+                    return redirect(url_for("profile_settings"))
+                if not profile:
+                    profile = UserProfile(user_id=user.id)
+                    db.session.add(profile)
+                profile.photo_data = photo_data
+                profile.photo_mime = photo_mime
+                profile.photo_updated_at = utcnow()
+                profile.updated_at = utcnow()
+            db.session.commit()
+            flash("Perfil atualizado.", "success")
+            return redirect(url_for("profile_settings"))
+
+        if action == "password":
+            current_password = request.form.get("current_password", "")
+            new_password = request.form.get("new_password", "")
+            confirm_password = request.form.get("confirm_password", "")
+            if not check_password_hash(user.password_hash, current_password):
+                flash("A senha atual está incorreta.", "error")
+            elif len(new_password) < 8:
+                flash("A nova senha precisa ter pelo menos 8 caracteres.", "error")
+            elif new_password != confirm_password:
+                flash("A confirmação da nova senha não coincide.", "error")
+            else:
+                user.password_hash = generate_password_hash(new_password)
+                db.session.commit()
+                flash("Senha alterada com sucesso.", "success")
+            return redirect(url_for("profile_settings"))
+
+    touch_presence(user)
+    return render_template(
+        "profile.html",
+        user=user,
+        user_photo_url=user_photo_url(user),
+        push_devices=UserPushSubscription.query.filter_by(user_id=user.id).count(),
+    )
+
+
+@app.get("/profile-photo/<int:user_id>")
+@login_required
+def profile_photo(user_id):
+    profile = profile_record(user_id)
+    if not profile or not profile.photo_data:
+        return "Foto não encontrada", 404
+    response = Response(profile.photo_data, mimetype=profile.photo_mime or "image/webp")
+    response.headers["Cache-Control"] = "private, max-age=3600"
+    return response
+
+
 @app.route("/dashboard")
 @login_required
 def dashboard():
     user = current_user()
     touch_presence(user)
-    return render_template("dashboard.html", user=user)
+    return render_template("dashboard.html", user=user, user_photo_url=user_photo_url(user))
 
 
 @app.route("/admin")
@@ -1164,6 +1292,7 @@ def admin_dashboard():
         whatsapp_ready=whatsapp_configured(),
         fofoca_models=load_fofoca_models(include_invalid=True),
         fofoca_storage=str(fofoca_frames_dir()),
+        user_photo_url=user_photo_url(user),
     )
 
 
@@ -1491,7 +1620,7 @@ def api_dashboard():
     touch_presence(user)
     users = User.query.filter(User.active.is_(True), User.id != user.id, User.is_admin.is_(False)).order_by(User.full_name.asc()).all()
     online = [
-        {"id": other.id, "username": other.username, "full_name": other.full_name}
+        {"id": other.id, "username": other.username, "full_name": other.full_name, "photo_url": user_photo_url(other)}
         for other in users if is_online(other)
     ]
 
@@ -1508,6 +1637,7 @@ def api_dashboard():
             "code": conv.code,
             "partner_name": partner.full_name,
             "partner_username": partner.username,
+            "partner_photo_url": user_photo_url(partner),
             "online": is_online(partner),
             "last_message": ("Figurinha" if last_message and sticker_token_from_message(last_message.text) else (last_message.text[:80] if last_message else "Conversa ainda sem mensagens")),
         })
@@ -1521,6 +1651,7 @@ def api_dashboard():
                 "id": invite.id,
                 "sender_name": sender.full_name,
                 "sender_username": sender.username,
+                "sender_photo_url": user_photo_url(sender),
             })
 
     return jsonify({"online": online, "conversations": conv_data, "invites": invite_data})
@@ -1615,7 +1746,14 @@ def conversation(code):
         return "Conversa não encontrada ou acesso negado.", 404
     touch_presence(user)
     partner = partner_for(conv, user)
-    return render_template("room.html", code=code, user=user, partner=partner)
+    return render_template(
+        "room.html",
+        code=code,
+        user=user,
+        partner=partner,
+        partner_photo_url=user_photo_url(partner),
+        user_photo_url=user_photo_url(user),
+    )
 
 
 @app.get("/api/messages/<code>")
@@ -2012,6 +2150,32 @@ def get_attachment_file(token):
     response.headers["Content-Disposition"] = f"{disposition}; filename=\"{safe_name}\""
     response.headers["Cache-Control"] = "private, max-age=86400"
     return response
+
+
+@app.get("/api/push/status")
+@login_required
+def push_status():
+    user = current_user()
+    return jsonify({
+        "registered_devices": UserPushSubscription.query.filter_by(user_id=user.id).count(),
+        "status": "ok",
+    })
+
+
+@app.post("/api/push/test")
+@login_required
+def push_test():
+    user = current_user()
+    result = send_user_push(
+        user.id,
+        "Nossa Sala • Teste",
+        "Se você recebeu isto, as notificações deste aparelho estão funcionando. 🔔",
+        url_for("dashboard"),
+        f"push-test-{user.id}-{int(utcnow().timestamp())}",
+    )
+    if result.get("sent", 0) <= 0:
+        return jsonify({"error": "Nenhuma notificação foi enviada. Ative ou repare as notificações neste aparelho.", **result}), 409
+    return jsonify({"status": "ok", **result})
 
 
 @app.get("/api/push/public-key")

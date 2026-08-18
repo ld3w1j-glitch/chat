@@ -1,0 +1,47 @@
+<!doctype html><html lang="pt-BR"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#1e2633"><title>Meu Perfil • Nossa Sala</title>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/static/icons/icon-192.png"><link rel="apple-touch-icon" href="/static/icons/icon-192.png"><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<body><main class="app-shell profile-shell">
+<header class="app-header"><div class="header-profile"><div class="avatar profile-header-avatar{% if user_photo_url %} has-photo{% endif %}">{% if user_photo_url %}<img src="{{ user_photo_url }}" alt="Foto de {{ user.full_name }}">{% else %}{{ user.full_name[0]|upper }}{% endif %}</div><div><strong>Meu Perfil</strong><div class="room-code">{{ user.full_name }} • @{{ user.username }}</div></div></div><div class="header-actions">{% if user.is_admin %}<a class="secondary compact link-button" href="{{ url_for('admin_dashboard') }}">Admin</a>{% endif %}<a class="secondary compact link-button" href="{{ url_for('dashboard') }}">Conversas</a></div></header>
+<div id="statusBar" class="status-bar hidden" role="status"></div>
+<div class="profile-content">
+{% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+<div class="profile-grid">
+<section class="panel-section profile-card"><div class="section-title"><div><h2>Foto e nome</h2><p>Esses dados aparecem para as pessoas nas conversas.</p></div></div>
+<form method="post" enctype="multipart/form-data" class="stack-form" id="profileForm"><input type="hidden" name="action" value="profile">
+<div class="profile-photo-editor"><div id="profilePreview" class="profile-photo-large{% if user_photo_url %} has-photo{% endif %}">{% if user_photo_url %}<img src="{{ user_photo_url }}" alt="Sua foto de perfil">{% else %}<span>{{ user.full_name[0]|upper }}</span>{% endif %}</div><div><label class="file-label profile-file-label">Escolher nova foto<input id="profilePhotoInput" name="photo" type="file" accept="image/jpeg,image/png,image/webp,image/*"></label><small>JPG, PNG ou WebP • até 5 MB. A imagem será ajustada para formato quadrado.</small></div></div>
+<label>Nome de exibição<input name="full_name" value="{{ user.full_name }}" maxlength="120" required></label>
+<label>Usuário de acesso<input value="@{{ user.username }}" disabled><small>O usuário de login permanece fixo para preservar suas conversas e histórico.</small></label>
+{% if user_photo_url %}<label class="check-row"><input type="checkbox" name="remove_photo" value="1"> Remover minha foto atual</label>{% endif %}
+<button class="primary" type="submit">Salvar perfil</button></form></section>
+
+<section class="panel-section profile-card"><div class="section-title"><div><h2>Alterar senha</h2><p>A senha atual é exigida antes da troca.</p></div></div>
+<form method="post" class="stack-form"><input type="hidden" name="action" value="password"><label>Senha atual<input name="current_password" type="password" autocomplete="current-password" required></label><label>Nova senha<input name="new_password" type="password" minlength="8" autocomplete="new-password" required></label><label>Confirmar nova senha<input name="confirm_password" type="password" minlength="8" autocomplete="new-password" required></label><button class="primary" type="submit">Alterar senha</button></form></section>
+
+<section class="panel-section profile-card notification-card"><div class="section-title"><div><h2>Notificações</h2><p>Receba mensagens mesmo quando a conversa não estiver aberta.</p></div><span id="pushState" class="state-pill">Verificando</span></div>
+<div class="notification-info"><div><strong id="registeredDevices">{{ push_devices }}</strong><span>aparelho(s) registrado(s) no servidor</span></div></div>
+<div class="profile-actions"><button id="enablePushBtn" class="primary" type="button">🔔 Ativar / reparar</button><button id="testPushBtn" class="secondary" type="button">Enviar notificação de teste</button></div>
+<p class="small">Cada aparelho precisa autorizar notificações pelo menos uma vez. Se você já havia autorizado antes e elas pararam, use <strong>Ativar / reparar</strong> para recriar a inscrição.</p></section>
+</div></div>
+</main><script src="/static/common.js"></script><script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const statusBar = $("statusBar"), state = $("pushState"), devices = $("registeredDevices");
+  const photoInput = $("profilePhotoInput"), preview = $("profilePreview");
+  function showStatus(message, error=false, timeout=6500){statusBar.textContent=message;statusBar.classList.remove("hidden","error");if(error)statusBar.classList.add("error");if(timeout)setTimeout(()=>statusBar.classList.add("hidden"),timeout);}
+  function refreshState(){
+    if (!("Notification" in window)) { state.textContent="Não suportado"; state.className="state-pill inactive"; return; }
+    if (Notification.permission === "granted") { state.textContent="Permitidas"; state.className="state-pill active"; }
+    else if (Notification.permission === "denied") { state.textContent="Bloqueadas"; state.className="state-pill inactive"; }
+    else { state.textContent="Não ativadas"; state.className="state-pill"; }
+  }
+  async function loadServerStatus(){try{const r=await fetch('/api/push/status',{cache:'no-store'});if(r.ok){const d=await r.json();devices.textContent=d.registered_devices ?? 0;}}catch(_){}}
+  $("enablePushBtn").addEventListener("click", async()=>{try{await NossaSala.enablePush();refreshState();await loadServerStatus();showStatus("Notificações ativadas e inscrição deste aparelho reparada.");}catch(err){refreshState();showStatus(err.message,true,9000);}});
+  $("testPushBtn").addEventListener("click", async()=>{try{const synced=await NossaSala.syncPushIfGranted();if(!synced)throw new Error("Ative as notificações primeiro.");const r=await fetch('/api/push/test',{method:'POST'});const d=await r.json();if(!r.ok)throw new Error(d.error||'Não foi possível enviar o teste.');showStatus(`Teste enviado para ${d.sent} aparelho(s). Aguarde a notificação.`);}catch(err){showStatus(err.message,true,9000);}});
+  photoInput?.addEventListener("change",()=>{const file=photoInput.files?.[0];if(!file)return;if(file.size>5*1024*1024){showStatus("A foto ultrapassa 5 MB.",true);photoInput.value="";return;}const url=URL.createObjectURL(file);preview.innerHTML=`<img src="${url}" alt="Prévia da nova foto">`;preview.classList.add("has-photo");});
+  refreshState();
+  NossaSala.syncPushIfGranted().then(async ok=>{refreshState();if(ok)await loadServerStatus();});
+  loadServerStatus();
+  setInterval(()=>NossaSala.ping(),20000);
+})();
+</script></body></html>
