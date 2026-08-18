@@ -1,5 +1,5 @@
-const CACHE = "nossa-sala-v3";
-const CORE = ["/", "/manifest.webmanifest", "/static/style.css", "/static/icons/icon-192.png", "/static/icons/icon-512.png"];
+const CACHE = "nossa-sala-v5";
+const CORE = ["/", "/manifest.webmanifest", "/static/style.css", "/static/common.js", "/static/icons/icon-192.png", "/static/icons/icon-512.png"];
 
 self.addEventListener("install", event => {
   event.waitUntil(

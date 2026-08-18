@@ -1,0 +1,15 @@
+<!doctype html><html lang="pt-BR"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Configurar administrador • Nossa Sala</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<body class="home"><main class="card auth-card wide-auth">
+<div class="heart">⚙️</div><h1>Primeiro administrador</h1><p>Esta tela aparece apenas enquanto não existe nenhuma conta administradora. Depois da criação, ela é desativada automaticamente.</p>
+{% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+<form method="post" class="stack-form">
+<label>Nome completo<input name="full_name" maxlength="120" required></label>
+<label>Usuário<input name="username" maxlength="40" required placeholder="admin"></label>
+<label>WhatsApp com DDD<input name="whatsapp" inputmode="tel"></label>
+<label>E-mail<input name="email" type="email"></label>
+<label>Senha<input name="password" type="password" minlength="8" required></label>
+<label>Confirmar senha<input name="confirm_password" type="password" minlength="8" required></label>
+<button class="primary" type="submit">Criar conta administradora</button>
+</form>
+</main></body></html>

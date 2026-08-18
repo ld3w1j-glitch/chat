@@ -1,0 +1,20 @@
+<!doctype html><html lang="pt-BR"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#ff4f7d"><title>Solicitar conta • Nossa Sala</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<body class="home"><main class="card auth-card wide-auth">
+<div class="heart">👤</div><h1>Solicitar uma conta</h1><p>Os dados abaixo vão para a conta administradora. Sua senha é armazenada somente de forma criptografada e não fica visível ao administrador.</p>
+{% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+<form method="post" class="stack-form">
+<div class="form-grid">
+<label>Nome completo<input name="full_name" maxlength="120" required></label>
+<label>Usuário desejado<input name="username" maxlength="40" required placeholder="ex.: washington"></label>
+<label>WhatsApp com DDD<input name="whatsapp" inputmode="tel" required placeholder="(35) 99999-9999"></label>
+<label>E-mail <span class="muted">(opcional)</span><input name="email" type="email" maxlength="120"></label>
+<label>Senha desejada<input name="password" type="password" minlength="8" required></label>
+<label>Confirmar senha<input name="confirm_password" type="password" minlength="8" required></label>
+</div>
+<label>Observação ao administrador <span class="muted">(opcional)</span><textarea name="note" maxlength="1000" rows="3" placeholder="Alguma informação que ajude o administrador a reconhecer você."></textarea></label>
+<label class="check-row"><input name="whatsapp_opt_in" type="checkbox" required> Autorizo receber pelo WhatsApp o aviso de que minha conta foi aprovada.</label>
+<button class="primary" type="submit">Enviar solicitação</button>
+</form>
+<div class="auth-links"><a href="{{ url_for('login') }}">Já tenho conta</a><a href="{{ url_for('index') }}">Voltar</a></div>
+</main></body></html>

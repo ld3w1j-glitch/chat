@@ -1,29 +1,21 @@
 <!doctype html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <meta name="theme-color" content="#ff4f7d">
-  <title>Nossa Sala</title>
-  <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="icon" href="/static/icons/icon-192.png">
-  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#ff4f7d"><title>Nossa Sala</title>
+  <link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/static/icons/icon-192.png"><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="home">
   <main class="card home-card">
-    <div class="heart">♥</div>
-    <h1>Nossa Sala</h1>
-    <p>Uma sala privada por link, com mensagens, emojis, figurinhas próprias e notificações.</p>
-    <form action="/create-room" method="post">
-      <button class="primary" type="submit">Criar nova sala</button>
-    </form>
-    <p class="small">Depois de criar a sala, envie o endereço para a outra pessoa.</p>
+    <div class="heart">♥</div><h1>Nossa Sala</h1>
+    <p>Mensagens privadas com contas individuais, usuários online, chamados, emojis, figurinhas e notificações.</p>
+    {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
+    <div class="home-actions">
+      <a class="primary link-button" href="{{ url_for('login') }}">Entrar</a>
+      <a class="secondary link-button" href="{{ url_for('request_account') }}">Criar conta</a>
+    </div>
+    <p class="small">Novas contas são aprovadas pela conta administradora.</p>
   </main>
-  <script>
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").catch(() => {});
-    }
-  </script>
+  <script src="/static/common.js"></script>
 </body>
 </html>
