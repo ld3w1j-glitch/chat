@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import os
+import shutil
+import zipfile
 import re
 import secrets
 import urllib.error
@@ -19,6 +22,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
     send_from_directory,
     session,
     url_for,
@@ -129,6 +133,146 @@ app.config.update(
 )
 
 db = SQLAlchemy(app)
+
+
+FOFOCA_FRAME_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,39}$")
+
+
+def fofoca_frames_dir() -> Path:
+    """Pasta persistente dos modelos de moldura.
+
+    No Railway, usa sempre o Volume anexado quando disponível. Isso mantém os
+    arquivos importados entre deploys, independentemente de o banco ser
+    PostgreSQL ou SQLite. Localmente, usa uma pasta dentro do projeto.
+    """
+    volume_path = os.getenv("RAILWAY_VOLUME_MOUNT_PATH", "").strip()
+    if volume_path:
+        base = Path(volume_path) / "fofoca_frames"
+    else:
+        base = Path(app.root_path) / "fofoca_frames"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def default_fofoca_models() -> list[dict]:
+    def model(model_id, name, banner, badge, badge_text, headline_bg, headline_text, kicker):
+        return {
+            "schema_version": 1,
+            "id": model_id,
+            "name": name,
+            "mode": "generated",
+            "canvas": {"width": 1080, "height": 1350, "background": "#0f1720"},
+            "photo": {"x": 0, "y": 0, "width": 1080, "height": 760},
+            "header": {
+                "x": 0, "y": 0, "width": 1080, "height": 118,
+                "color": banner, "title": "FOFOCA", "subtitle": kicker,
+                "title_color": "#ffffff", "subtitle_color": "#ffffff"
+            },
+            "card": {
+                "x": 52, "y": 790, "width": 976, "height": 470,
+                "background": headline_bg, "radius": 34
+            },
+            "badge": {
+                "x": 86, "y": 818, "width": 280, "height": 56,
+                "background": badge, "color": badge_text, "text": "NOTÍCIA"
+            },
+            "headline": {
+                "x": 94, "y": 940, "max_width": 892, "line_height": 84,
+                "max_lines": 4, "font_size": 70, "color": headline_text,
+                "uppercase": True, "font_weight": 800
+            },
+            "footer": {
+                "x": 96, "y": 1218, "text": "Compartilhado no Nossa Sala",
+                "font_size": 24, "color": "#475569"
+            }
+        }
+    return [
+        model("plantao", "Plantão", "#b3261e", "#ffdfdf", "#7e1611", "#ffffff", "#111827", "PLANTÃO DA FOFOCA"),
+        model("manchete", "Manchete", "#1f3a5f", "#d9e7ff", "#163152", "#f8fafc", "#0f172a", "MANCHETE DO DIA"),
+        model("urgente", "Urgente", "#8a5a10", "#fff2d6", "#704300", "#fffaf0", "#18181b", "URGENTE"),
+    ]
+
+
+def validate_fofoca_model(data: dict) -> dict:
+    if not isinstance(data, dict):
+        raise ValueError("modelo.json precisa conter um objeto JSON.")
+    model_id = str(data.get("id") or "").strip().lower()
+    if not FOFOCA_FRAME_ID_RE.fullmatch(model_id):
+        raise ValueError("O id da moldura deve usar apenas letras minúsculas, números, _ ou - (2 a 40 caracteres).")
+    name = str(data.get("name") or "").strip()[:80]
+    if not name:
+        raise ValueError(f"A moldura {model_id} precisa ter um nome.")
+    mode = str(data.get("mode") or "generated").strip().lower()
+    if mode not in {"generated", "overlay"}:
+        raise ValueError(f"Modo inválido na moldura {model_id}. Use generated ou overlay.")
+
+    canvas = data.get("canvas") or {}
+    if int(canvas.get("width") or 0) != 1080 or int(canvas.get("height") or 0) != 1350:
+        raise ValueError(f"A moldura {model_id} deve usar canvas 1080x1350.")
+
+    photo = data.get("photo") or {}
+    headline = data.get("headline") or {}
+    required_numeric = [
+        (photo, "x"), (photo, "y"), (photo, "width"), (photo, "height"),
+        (headline, "x"), (headline, "y"), (headline, "max_width"),
+        (headline, "line_height"), (headline, "max_lines"), (headline, "font_size"),
+    ]
+    for obj, key in required_numeric:
+        try:
+            value = float(obj.get(key))
+        except (TypeError, ValueError):
+            raise ValueError(f"Campo numérico ausente ou inválido: {model_id}.{key}")
+        if value < 0:
+            raise ValueError(f"Campo negativo não permitido: {model_id}.{key}")
+
+    data = dict(data)
+    data["id"] = model_id
+    data["name"] = name
+    data["mode"] = mode
+    data["schema_version"] = 1
+    return data
+
+
+def ensure_default_fofoca_models() -> None:
+    root = fofoca_frames_dir()
+    for model in default_fofoca_models():
+        folder = root / model["id"]
+        config_path = folder / "modelo.json"
+        if config_path.exists():
+            continue
+        folder.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps(model, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+
+def load_fofoca_models(include_invalid: bool = False) -> list[dict]:
+    ensure_default_fofoca_models()
+    models = []
+    for config_path in sorted(fofoca_frames_dir().glob("*/modelo.json")):
+        try:
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+            model = validate_fofoca_model(raw)
+            overlay_name = str(model.get("overlay") or "").strip()
+            overlay_path = config_path.parent / overlay_name if overlay_name else None
+            if model["mode"] == "overlay":
+                model["overlay_available"] = bool(overlay_path and overlay_path.exists() and overlay_path.is_file())
+            else:
+                model["overlay_available"] = False
+            models.append(model)
+        except Exception as exc:
+            if include_invalid:
+                models.append({"id": config_path.parent.name, "name": config_path.parent.name, "invalid": True, "error": str(exc)})
+    return models
+
+
+def public_fofoca_model(model: dict) -> dict:
+    clean = json.loads(json.dumps(model, ensure_ascii=False))
+    if clean.get("mode") == "overlay" and clean.get("overlay_available"):
+        clean["overlay_url"] = url_for("fofoca_frame_overlay", frame_id=clean["id"])
+    else:
+        clean["overlay_url"] = None
+    clean.pop("overlay_available", None)
+    return clean
 
 
 # Tabelas antigas são mantidas para compatibilidade com bancos já existentes.
@@ -292,6 +436,7 @@ class TypingState(db.Model):
 
 
 with app.app_context():
+    ensure_default_fofoca_models()
     db.create_all()
 
     # Segredo de sessão persistente no PostgreSQL, evitando logout em redeploy.
@@ -872,7 +1017,199 @@ def admin_dashboard():
         recent=recent,
         users=users,
         whatsapp_ready=whatsapp_configured(),
+        fofoca_models=load_fofoca_models(include_invalid=True),
+        fofoca_storage=str(fofoca_frames_dir()),
     )
+
+
+@app.get("/admin/fofoca-modelos/exportar")
+@admin_required
+def admin_export_fofoca_models():
+    ensure_default_fofoca_models()
+    buffer = io.BytesIO()
+    root = fofoca_frames_dir()
+    guide = """MODELOS DE FOFOCA - NOSSA SALA
+
+COMO CRIAR UMA NOVA MOLDURA
+1. Extraia este ZIP.
+2. Duplique uma pasta de modelo.
+3. Troque o campo id e name dentro do modelo.json.
+4. Para uma moldura criada no Photoshop/Illustrator, use mode = overlay.
+5. Crie um overlay.png de 1080 x 1350 px na mesma pasta do modelo.json.
+6. Deixe transparente a região onde a foto deverá aparecer.
+7. Ajuste no modelo.json as coordenadas photo e headline.
+8. Compacte novamente as pastas em um ZIP.
+9. No painel Admin > Modelos de Fofoca, use Importar pacote.
+
+IMPORTANTE
+- A única informação editável pelo usuário no chat continua sendo a notícia/manchete.
+- Modelos com o mesmo id são substituídos na importação.
+- O arquivo overlay.png é opcional em modelos generated e obrigatório em modelos overlay.
+- Canvas suportado: 1080 x 1350 px.
+
+CAMPOS PRINCIPAIS DO modelo.json
+id: identificador único, ex.: revista_bairro
+name: nome que aparecerá no menu
+mode: generated ou overlay
+photo: x, y, width, height da foto
+headline: x, y, max_width, line_height, max_lines, font_size, color
+"""
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("LEIA-ME_MODELOS.txt", guide)
+        sample = {
+            "schema_version": 1,
+            "id": "minha_moldura",
+            "name": "Minha moldura",
+            "mode": "overlay",
+            "canvas": {"width": 1080, "height": 1350, "background": "#0f1720"},
+            "photo": {"x": 40, "y": 140, "width": 1000, "height": 720},
+            "headline": {
+                "x": 90, "y": 1010, "max_width": 900, "line_height": 78,
+                "max_lines": 3, "font_size": 66, "color": "#ffffff",
+                "uppercase": True, "font_weight": 800
+            },
+            "overlay": "overlay.png"
+        }
+        zf.writestr("EXEMPLO_PERSONALIZADO/modelo.exemplo.json", json.dumps(sample, ensure_ascii=False, indent=2))
+        zf.writestr(
+            "EXEMPLO_PERSONALIZADO/COMO_USAR.txt",
+            "Renomeie modelo.exemplo.json para modelo.json, crie um overlay.png 1080x1350 e depois compacte a pasta para importar.\n"
+        )
+        for file_path in root.rglob("*"):
+            if file_path.is_file():
+                rel = file_path.relative_to(root)
+                zf.write(file_path, str(rel))
+    buffer.seek(0)
+    return send_file(
+        buffer,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"modelos_fofoca_{datetime.now().strftime('%Y%m%d_%H%M')}.zip",
+    )
+
+
+@app.post("/admin/fofoca-modelos/importar")
+@admin_required
+def admin_import_fofoca_models():
+    upload = request.files.get("package")
+    if not upload or not upload.filename:
+        flash("Selecione um arquivo ZIP com os modelos.", "error")
+        return redirect(url_for("admin_dashboard"))
+    if not upload.filename.lower().endswith(".zip"):
+        flash("O pacote de modelos precisa ser um arquivo .zip.", "error")
+        return redirect(url_for("admin_dashboard"))
+
+    try:
+        raw_zip = upload.read(20 * 1024 * 1024 + 1)
+        if len(raw_zip) > 20 * 1024 * 1024:
+            raise ValueError("O pacote ultrapassa o limite de 20 MB.")
+        with zipfile.ZipFile(io.BytesIO(raw_zip), "r") as zf:
+            infos = [i for i in zf.infolist() if not i.is_dir()]
+            if len(infos) > 200:
+                raise ValueError("O pacote possui arquivos demais.")
+            total_uncompressed = sum(i.file_size for i in infos)
+            if total_uncompressed > 35 * 1024 * 1024:
+                raise ValueError("O conteúdo descompactado ultrapassa 35 MB.")
+
+            model_entries = [i for i in infos if Path(i.filename).name.lower() == "modelo.json"]
+            if not model_entries:
+                raise ValueError("Nenhum modelo.json foi encontrado no ZIP.")
+
+            imported = []
+            root = fofoca_frames_dir()
+            for info in model_entries:
+                parent = Path(info.filename).parent
+                try:
+                    model_data = json.loads(zf.read(info).decode("utf-8"))
+                except Exception as exc:
+                    raise ValueError(f"JSON inválido em {info.filename}: {exc}")
+                model = validate_fofoca_model(model_data)
+                model_id = model["id"]
+
+                overlay_bytes = None
+                overlay_name = str(model.get("overlay") or "").strip()
+                if model["mode"] == "overlay":
+                    if not overlay_name:
+                        overlay_name = "overlay.png"
+                        model["overlay"] = overlay_name
+                    if overlay_name != "overlay.png":
+                        raise ValueError(f"A moldura {model_id} deve usar exatamente o arquivo overlay.png na própria pasta.")
+                    target_name = str(parent / overlay_name).replace("\\", "/")
+                    try:
+                        overlay_info = zf.getinfo(target_name)
+                    except KeyError:
+                        raise ValueError(f"A moldura {model_id} usa mode=overlay, mas {overlay_name} não foi encontrado.")
+                    if overlay_info.file_size > 8 * 1024 * 1024:
+                        raise ValueError(f"O overlay da moldura {model_id} ultrapassa 8 MB.")
+                    overlay_bytes = zf.read(overlay_info)
+
+                target = root / model_id
+                temp = root / f".{model_id}_import_{secrets.token_hex(4)}"
+                if temp.exists():
+                    shutil.rmtree(temp)
+                temp.mkdir(parents=True, exist_ok=True)
+                (temp / "modelo.json").write_text(json.dumps(model, ensure_ascii=False, indent=2), encoding="utf-8")
+                if overlay_bytes is not None:
+                    (temp / "overlay.png").write_bytes(overlay_bytes)
+
+                # Preserva pequenos arquivos auxiliares do diretório do modelo.
+                prefix = str(parent).replace("\\", "/").rstrip("/") + "/"
+                for extra in infos:
+                    normalized = extra.filename.replace("\\", "/")
+                    if not normalized.startswith(prefix):
+                        continue
+                    basename = Path(normalized).name
+                    if basename in {"modelo.json", "overlay.png"}:
+                        continue
+                    if basename.lower().endswith((".txt", ".md")) and extra.file_size <= 200_000:
+                        (temp / basename).write_bytes(zf.read(extra))
+
+                if target.exists():
+                    shutil.rmtree(target)
+                temp.rename(target)
+                imported.append(model["name"])
+
+        flash(f"Modelos importados com sucesso: {', '.join(imported)}.", "success")
+    except zipfile.BadZipFile:
+        flash("O arquivo enviado não é um ZIP válido.", "error")
+    except Exception as exc:
+        flash(f"Não foi possível importar os modelos: {exc}", "error")
+    return redirect(url_for("admin_dashboard"))
+
+
+@app.get("/api/fofoca-frames")
+@login_required
+def api_fofoca_frames():
+    models = []
+    for model in load_fofoca_models():
+        # Modelo overlay sem PNG ainda é mantido fora do menu até ficar completo.
+        if model.get("mode") == "overlay" and not model.get("overlay_available"):
+            continue
+        models.append(public_fofoca_model(model))
+    return jsonify(models)
+
+
+@app.get("/fofoca-frame/<frame_id>/overlay")
+@login_required
+def fofoca_frame_overlay(frame_id):
+    frame_id = (frame_id or "").strip().lower()
+    if not FOFOCA_FRAME_ID_RE.fullmatch(frame_id):
+        return "Modelo inválido", 404
+    folder = fofoca_frames_dir() / frame_id
+    config_path = folder / "modelo.json"
+    if not config_path.exists():
+        return "Modelo não encontrado", 404
+    try:
+        model = validate_fofoca_model(json.loads(config_path.read_text(encoding="utf-8")))
+    except Exception:
+        return "Modelo inválido", 404
+    overlay_name = Path(str(model.get("overlay") or "overlay.png")).name
+    overlay_path = folder / overlay_name
+    if not overlay_path.exists():
+        return "Overlay não encontrado", 404
+    response = send_from_directory(folder, overlay_name, mimetype="image/png")
+    response.headers["Cache-Control"] = "private, max-age=300"
+    return response
 
 
 @app.post("/admin/requests/<int:req_id>/approve")

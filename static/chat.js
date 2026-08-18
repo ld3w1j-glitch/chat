@@ -24,6 +24,8 @@
   let pendingAttachment = null;
   let fofocaImage = null;
   let fofocaObjectUrl = null;
+  let fofocaFrames = [];
+  const fofocaOverlayCache = new Map();
 
   const messagesEl = $("messages"), form = $("messageForm"), input = $("messageInput");
   const statusBar = $("statusBar"), notifyBtn = $("notifyBtn"), installBtn = $("installBtn");
@@ -170,6 +172,7 @@
 
   function showFofocaComposer() {
     hideAttachmentMenu();
+    loadFofocaFrames();
     clearAttachment();
     toolDrawer.classList.add("hidden");
     fofocaComposer?.classList.remove("hidden");
@@ -183,7 +186,7 @@
     if (resetFields) {
       if (fofocaFile) fofocaFile.value = "";
       if (fofocaHeadline) fofocaHeadline.value = "";
-      if (fofocaFrameSelect) fofocaFrameSelect.value = "plantao";
+      if (fofocaFrameSelect && fofocaFrames[0]) fofocaFrameSelect.value = fofocaFrames[0].id;
     }
   }
 
@@ -212,85 +215,169 @@
     finalLines.forEach((ln, i) => ctx.fillText(ln, x, y + i * lineHeight));
   }
 
-  function getFofocaTheme(id) {
-    const themes = {
-      plantao: {banner:"#b3261e", badge:"#ffdfdf", badgeText:"#7e1611", headlineBg:"#ffffff", headlineText:"#111827", kicker:"PLANTÃO DA FOFOCA"},
-      manchete: {banner:"#1f3a5f", badge:"#d9e7ff", badgeText:"#163152", headlineBg:"#f8fafc", headlineText:"#0f172a", kicker:"MANCHETE DO DIA"},
-      urgente: {banner:"#8a5a10", badge:"#fff2d6", badgeText:"#704300", headlineBg:"#fffaf0", headlineText:"#18181b", kicker:"URGENTE"},
-    };
-    return themes[id] || themes.plantao;
+  async function loadFofocaFrames(force=false) {
+    if (fofocaFrames.length && !force) return fofocaFrames;
+    try {
+      const r = await fetch('/api/fofoca-frames', {cache:'no-store'});
+      if (!r.ok) throw new Error('Não foi possível carregar os modelos.');
+      fofocaFrames = await r.json();
+      const previous = fofocaFrameSelect?.value || '';
+      fofocaFrameSelect.innerHTML = '';
+      for (const frame of fofocaFrames) {
+        const option = document.createElement('option');
+        option.value = frame.id;
+        option.textContent = frame.name;
+        fofocaFrameSelect.appendChild(option);
+      }
+      if (previous && fofocaFrames.some(f => f.id === previous)) fofocaFrameSelect.value = previous;
+      if (!fofocaFrameSelect.value && fofocaFrames[0]) fofocaFrameSelect.value = fofocaFrames[0].id;
+      renderFofoca();
+      return fofocaFrames;
+    } catch (err) {
+      status(err.message, true, 6500);
+      return [];
+    }
+  }
+
+  function currentFofocaFrame() {
+    return fofocaFrames.find(frame => frame.id === fofocaFrameSelect?.value) || fofocaFrames[0] || null;
+  }
+
+  function drawCoverImage(ctx, img, rect) {
+    const x = Number(rect?.x || 0), y = Number(rect?.y || 0);
+    const width = Number(rect?.width || 1080), height = Number(rect?.height || 760);
+    const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+    const scale = Math.max(width / iw, height / ih);
+    const dw = iw * scale, dh = ih * scale;
+    const dx = x + (width - dw) / 2, dy = y + (height - dh) / 2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, width, height);
+    ctx.clip();
+    ctx.drawImage(img, dx, dy, dw, dh);
+    ctx.restore();
+  }
+
+  function roundRectFill(ctx, x, y, width, height, radius, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, width, height, radius);
+    else ctx.rect(x, y, width, height);
+    ctx.fill();
+  }
+
+  function loadOverlayForFrame(frame) {
+    if (!frame?.overlay_url) return null;
+    if (fofocaOverlayCache.has(frame.id)) return fofocaOverlayCache.get(frame.id);
+    const img = new Image();
+    const state = {img, loaded:false, failed:false};
+    fofocaOverlayCache.set(frame.id, state);
+    img.onload = () => { state.loaded = true; renderFofoca(); };
+    img.onerror = () => { state.failed = true; status(`Não consegui carregar o overlay de ${frame.name}.`, true); };
+    img.src = frame.overlay_url;
+    return state;
+  }
+
+  function renderGeneratedFofoca(frame, headline) {
+    const ctx = fofocaCtx;
+    const header = frame.header || {};
+    const card = frame.card || {};
+    const badge = frame.badge || {};
+    const headlineCfg = frame.headline || {};
+    const footer = frame.footer || {};
+
+    ctx.fillStyle = header.color || '#1f3a5f';
+    ctx.fillRect(Number(header.x||0), Number(header.y||0), Number(header.width||1080), Number(header.height||118));
+    ctx.textAlign = 'left';
+    ctx.fillStyle = header.title_color || '#ffffff';
+    ctx.font = '700 58px Inter, Arial, sans-serif';
+    ctx.fillText(header.title || 'FOFOCA', 64, 78);
+    ctx.font = '600 28px Inter, Arial, sans-serif';
+    ctx.globalAlpha = .9;
+    ctx.fillText(header.subtitle || '', 66, 106);
+    ctx.globalAlpha = 1;
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,.28)';
+    ctx.shadowBlur = 26;
+    roundRectFill(ctx, Number(card.x||52), Number(card.y||790), Number(card.width||976), Number(card.height||470), Number(card.radius||34), card.background || '#ffffff');
+    ctx.restore();
+
+    roundRectFill(ctx, Number(badge.x||86), Number(badge.y||818), Number(badge.width||280), Number(badge.height||56), 20, badge.background || '#d9e7ff');
+    ctx.fillStyle = badge.color || '#163152';
+    ctx.font = '700 28px Inter, Arial, sans-serif';
+    ctx.fillText(badge.text || 'NOTÍCIA', Number(badge.x||86) + 28, Number(badge.y||818) + 36);
+
+    drawHeadline(frame, headline);
+
+    ctx.fillStyle = footer.color || '#475569';
+    ctx.font = `500 ${Number(footer.font_size||24)}px Inter, Arial, sans-serif`;
+    ctx.fillText(footer.text || 'Compartilhado no Nossa Sala', Number(footer.x||96), Number(footer.y||1218));
+  }
+
+  function drawHeadline(frame, headline) {
+    const cfg = frame.headline || {};
+    const weight = Number(cfg.font_weight || 800);
+    const fontSize = Number(cfg.font_size || 70);
+    fofocaCtx.fillStyle = cfg.color || '#ffffff';
+    fofocaCtx.font = `${weight} ${fontSize}px Inter, Arial, sans-serif`;
+    fofocaCtx.textAlign = 'left';
+    const value = cfg.uppercase === false ? headline : headline.toUpperCase();
+    wrapCanvasText(
+      fofocaCtx,
+      value,
+      Number(cfg.x || 90),
+      Number(cfg.y || 1010),
+      Number(cfg.max_width || 900),
+      Number(cfg.line_height || 78),
+      Number(cfg.max_lines || 3)
+    );
   }
 
   function renderFofoca() {
     if (!fofocaCtx || !fofocaCanvas) return;
-    const w = fofocaCanvas.width, h = fofocaCanvas.height;
-    const theme = getFofocaTheme(fofocaFrameSelect?.value || "plantao");
-    const headline = (fofocaHeadline?.value || "A sua notícia aparece aqui").trim() || "A sua notícia aparece aqui";
+    const frame = currentFofocaFrame();
+    if (!frame) {
+      fofocaCtx.clearRect(0, 0, fofocaCanvas.width, fofocaCanvas.height);
+      return;
+    }
+    const canvasCfg = frame.canvas || {};
+    const w = Number(canvasCfg.width || 1080), h = Number(canvasCfg.height || 1350);
+    if (fofocaCanvas.width !== w) fofocaCanvas.width = w;
+    if (fofocaCanvas.height !== h) fofocaCanvas.height = h;
+    const headline = (fofocaHeadline?.value || 'A sua notícia aparece aqui').trim() || 'A sua notícia aparece aqui';
     fofocaCtx.clearRect(0, 0, w, h);
-    fofocaCtx.fillStyle = "#0f1720";
+    fofocaCtx.fillStyle = canvasCfg.background || '#0f1720';
     fofocaCtx.fillRect(0, 0, w, h);
 
     if (fofocaImage) {
-      const iw = fofocaImage.naturalWidth || fofocaImage.width;
-      const ih = fofocaImage.naturalHeight || fofocaImage.height;
-      const targetH = 760;
-      const scale = Math.max(w / iw, targetH / ih);
-      const dw = iw * scale, dh = ih * scale;
-      const dx = (w - dw) / 2, dy = (targetH - dh) / 2;
-      fofocaCtx.drawImage(fofocaImage, dx, dy, dw, dh);
-      const g = fofocaCtx.createLinearGradient(0, 500, 0, 820);
-      g.addColorStop(0, 'rgba(15,23,32,0)');
-      g.addColorStop(1, 'rgba(15,23,32,0.55)');
-      fofocaCtx.fillStyle = g;
-      fofocaCtx.fillRect(0, 500, w, 320);
-      if (fofocaHint) fofocaHint.classList.add("hidden");
+      drawCoverImage(fofocaCtx, fofocaImage, frame.photo || {x:0,y:0,width:w,height:760});
+      if (fofocaHint) fofocaHint.classList.add('hidden');
     } else {
+      const photo = frame.photo || {x:0,y:0,width:w,height:760};
       fofocaCtx.fillStyle = '#1a2330';
-      fofocaCtx.fillRect(0, 0, w, 760);
+      fofocaCtx.fillRect(Number(photo.x||0), Number(photo.y||0), Number(photo.width||w), Number(photo.height||760));
       fofocaCtx.fillStyle = 'rgba(255,255,255,.22)';
       fofocaCtx.font = '600 44px Inter, Arial, sans-serif';
       fofocaCtx.textAlign = 'center';
-      fofocaCtx.fillText('Escolha uma imagem', w / 2, 380);
-      if (fofocaHint) fofocaHint.classList.remove("hidden");
+      fofocaCtx.fillText('Escolha uma imagem', Number(photo.x||0) + Number(photo.width||w)/2, Number(photo.y||0) + Number(photo.height||760)/2);
+      if (fofocaHint) fofocaHint.classList.remove('hidden');
     }
 
-    fofocaCtx.fillStyle = theme.banner;
-    fofocaCtx.fillRect(0, 0, w, 118);
-    fofocaCtx.fillStyle = '#ffffff';
-    fofocaCtx.font = '700 58px Inter, Arial, sans-serif';
-    fofocaCtx.textAlign = 'left';
-    fofocaCtx.fillText('FOFOCA', 64, 78);
-    fofocaCtx.font = '600 28px Inter, Arial, sans-serif';
-    fofocaCtx.globalAlpha = .9;
-    fofocaCtx.fillText(theme.kicker, 66, 106);
-    fofocaCtx.globalAlpha = 1;
-
-    const cardX = 52, cardY = 790, cardW = w - 104, cardH = 470;
-    fofocaCtx.save();
-    fofocaCtx.shadowColor = 'rgba(0,0,0,.28)';
-    fofocaCtx.shadowBlur = 26;
-    fofocaCtx.fillStyle = theme.headlineBg;
-    fofocaCtx.beginPath();
-    fofocaCtx.roundRect(cardX, cardY, cardW, cardH, 34);
-    fofocaCtx.fill();
-    fofocaCtx.restore();
-
-    fofocaCtx.fillStyle = theme.badge;
-    fofocaCtx.beginPath();
-    fofocaCtx.roundRect(cardX + 34, cardY + 28, 280, 56, 20);
-    fofocaCtx.fill();
-    fofocaCtx.fillStyle = theme.badgeText;
-    fofocaCtx.font = '700 28px Inter, Arial, sans-serif';
-    fofocaCtx.fillText('NOTÍCIA', cardX + 62, cardY + 64);
-
-    fofocaCtx.fillStyle = theme.headlineText;
-    fofocaCtx.font = '800 70px Inter, Arial, sans-serif';
-    fofocaCtx.textAlign = 'left';
-    wrapCanvasText(fofocaCtx, headline.toUpperCase(), cardX + 42, cardY + 150, cardW - 84, 84, 4);
-
-    fofocaCtx.fillStyle = '#475569';
-    fofocaCtx.font = '500 24px Inter, Arial, sans-serif';
-    fofocaCtx.fillText('Compartilhado no Nossa Sala', cardX + 44, cardY + cardH - 42);
+    if (frame.mode === 'overlay') {
+      const overlayState = loadOverlayForFrame(frame);
+      if (overlayState?.loaded) fofocaCtx.drawImage(overlayState.img, 0, 0, w, h);
+      drawHeadline(frame, headline);
+    } else {
+      // Gradiente suave preservado nos modelos gerados.
+      const photo = frame.photo || {x:0,y:0,width:w,height:760};
+      const g = fofocaCtx.createLinearGradient(0, Number(photo.y||0)+Number(photo.height||760)*.66, 0, Number(photo.y||0)+Number(photo.height||760)+60);
+      g.addColorStop(0, 'rgba(15,23,32,0)');
+      g.addColorStop(1, 'rgba(15,23,32,0.55)');
+      fofocaCtx.fillStyle = g;
+      fofocaCtx.fillRect(Number(photo.x||0), Number(photo.y||0)+Number(photo.height||760)*.62, Number(photo.width||w), Number(photo.height||760)*.45);
+      renderGeneratedFofoca(frame, headline);
+    }
   }
 
   async function sendFofocaCard() {
@@ -744,7 +831,7 @@
     if (tab === "stickers") loadStickers();
   }
   $("emojiBtn").addEventListener("click", () => showTool("emoji"));
-  renderFofoca();
+  loadFofocaFrames();
   $("stickerBtn").addEventListener("click", () => showTool("stickers"));
   document.querySelectorAll(".tool-tab").forEach(btn => btn.addEventListener("click", () => showTool(btn.dataset.tab)));
   $("closeToolsBtn").addEventListener("click", () => toolDrawer.classList.add("hidden"));

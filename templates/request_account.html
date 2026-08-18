@@ -1,5 +1,5 @@
 <!doctype html><html lang="pt-BR"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#ff4f7d"><title>Solicitar conta • Nossa Sala</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#1e2633"><title>Solicitar conta • Nossa Sala</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
 <body class="home"><main class="card auth-card wide-auth">
 <div class="heart">👤</div><h1>Solicitar uma conta</h1><p>Os dados abaixo vão para a conta administradora. Sua senha é armazenada somente de forma criptografada e não fica visível ao administrador.</p>
 {% with messages = get_flashed_messages(with_categories=true) %}{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}{% endwith %}
