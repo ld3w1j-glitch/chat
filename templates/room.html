@@ -2,8 +2,12 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#ff4f7d">
   <title>Nossa Sala</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -13,39 +17,171 @@
         <strong>Nossa Sala ♥</strong>
         <div class="room-code">Sala: {{ code }}</div>
       </div>
-      <button id="copyBtn" class="secondary">Copiar link</button>
+      <div class="header-actions">
+        <button id="installBtn" class="secondary compact hidden" type="button">📲 Instalar</button>
+        <button id="notifyBtn" class="secondary compact" type="button">🔔 Notificações</button>
+        <button id="copyBtn" class="secondary compact" type="button">🔗 Link</button>
+      </div>
     </header>
+
+    <div id="statusBar" class="status-bar hidden" role="status"></div>
 
     <section id="loginPanel" class="name-panel">
       <h2>Como devemos chamar você?</h2>
       <input id="nameInput" maxlength="40" autocomplete="name" placeholder="Seu nome">
-      <button id="enterBtn" class="primary">Entrar na conversa</button>
+      <button id="enterBtn" class="primary" type="button">Entrar na conversa</button>
+      <p class="small">Seu nome fica salvo apenas neste navegador.</p>
     </section>
 
     <section id="chatPanel" class="chat-panel hidden">
-      <div id="messages" class="messages"></div>
-      <form id="messageForm" class="composer">
-        <textarea id="messageInput" maxlength="2000" rows="1" placeholder="Digite uma mensagem..." autocomplete="off"></textarea>
-        <button class="send" type="submit">Enviar</button>
-      </form>
+      <div id="messages" class="messages" aria-live="polite"></div>
+
+      <section id="toolDrawer" class="tool-drawer hidden">
+        <div class="tool-tabs">
+          <button class="tool-tab active" data-tab="emoji" type="button">😊 Emojis</button>
+          <button class="tool-tab" data-tab="stickers" type="button">🖼️ Figurinhas</button>
+          <button id="closeToolsBtn" class="tool-close" type="button" aria-label="Fechar">×</button>
+        </div>
+
+        <div id="emojiPanel" class="tool-panel">
+          <div id="emojiGrid" class="emoji-grid"></div>
+        </div>
+
+        <div id="stickersPanel" class="tool-panel hidden">
+          <div class="sticker-layout">
+            <div class="sticker-editor">
+              <div class="editor-head">
+                <strong>Criar figurinha</strong>
+                <span>Salva no banco da sala</span>
+              </div>
+
+              <label class="file-label">
+                Escolher foto
+                <input id="stickerFile" type="file" accept="image/*">
+              </label>
+
+              <div class="canvas-wrap">
+                <canvas id="stickerCanvas" width="512" height="512"></canvas>
+                <div id="canvasHint" class="canvas-hint">Escolha uma foto</div>
+              </div>
+
+              <div class="control-grid">
+                <label>
+                  Opacidade <span id="opacityValue">100%</span>
+                  <input id="opacityRange" type="range" min="5" max="100" value="100">
+                </label>
+
+                <label>
+                  Remover fundo
+                  <select id="removeMode">
+                    <option value="none">Não remover</option>
+                    <option value="dark">Remover escuros / preto</option>
+                    <option value="light">Remover claros / branco</option>
+                  </select>
+                </label>
+
+                <label>
+                  Limite de cor <span id="thresholdValue">45</span>
+                  <input id="thresholdRange" type="range" min="0" max="255" value="45">
+                </label>
+
+                <label>
+                  Suavidade <span id="softnessValue">28</span>
+                  <input id="softnessRange" type="range" min="0" max="100" value="28">
+                </label>
+              </div>
+
+              <div class="editor-actions">
+                <button id="resetStickerBtn" class="secondary" type="button">Restaurar</button>
+                <button id="saveStickerBtn" class="primary" type="button">Salvar figurinha</button>
+              </div>
+            </div>
+
+            <div class="saved-stickers">
+              <div class="editor-head">
+                <strong>Figurinhas salvas</strong>
+                <span>Clique para enviar</span>
+              </div>
+              <div id="stickerGallery" class="sticker-gallery"></div>
+              <div id="emptyStickers" class="empty-state">Nenhuma figurinha salva ainda.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="composer-shell">
+        <div class="composer-tools">
+          <button id="emojiBtn" class="icon-btn" type="button" title="Emojis">😊</button>
+          <button id="stickerBtn" class="icon-btn" type="button" title="Figurinhas">🖼️</button>
+        </div>
+        <form id="messageForm" class="composer">
+          <textarea id="messageInput" maxlength="2000" rows="1" placeholder="Digite uma mensagem..." autocomplete="off"></textarea>
+          <button class="send" type="submit">Enviar</button>
+        </form>
+      </div>
     </section>
   </main>
 
 <script>
 const ROOM = "{{ code }}";
-let username = localStorage.getItem("chat_name") || "";
-let lastId = 0;
+const EMOJIS = [
+  "😀","😃","😄","😁","😆","😅","😂","🤣","😊","🥰","😍","😘","😚","😋","😜","🤪","🤗","🤭",
+  "😎","🥳","😏","😒","🙄","🥺","😭","😡","🤯","😴","🤔","🫡","🤝","👏","🙌","🙏","👍","👎",
+  "❤️","🩷","🧡","💛","💚","💙","💜","🖤","🤍","💔","💕","💞","💓","💗","💖","💘","💝",
+  "🔥","✨","⭐","🌙","☀️","🌹","🌸","🍕","🍔","🍫","☕","🍻","🎂","🎉","🎁","🎵","🎮","📷",
+  "🐶","🐱","🐻","🦊","🐼","🙈","🙉","🙊","💋","💌","🏠","🚗","✈️","✅","❌","⚠️","💯"
+];
 
-const loginPanel = document.getElementById("loginPanel");
-const chatPanel = document.getElementById("chatPanel");
-const nameInput = document.getElementById("nameInput");
-const enterBtn = document.getElementById("enterBtn");
-const messagesEl = document.getElementById("messages");
-const form = document.getElementById("messageForm");
-const input = document.getElementById("messageInput");
-const copyBtn = document.getElementById("copyBtn");
+let username = localStorage.getItem("chat_name") || "";
+let deviceId = localStorage.getItem("chat_device_id") || "";
+let lastId = 0;
+let loadingMessages = false;
+const seenMessageIds = new Set();
+let originalImage = null;
+let stickerObjectUrl = null;
+let renderTimer = null;
+
+if (!deviceId) {
+  deviceId = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
+  localStorage.setItem("chat_device_id", deviceId);
+}
+
+const $ = (id) => document.getElementById(id);
+const loginPanel = $("loginPanel");
+const chatPanel = $("chatPanel");
+const nameInput = $("nameInput");
+const enterBtn = $("enterBtn");
+const messagesEl = $("messages");
+const form = $("messageForm");
+const input = $("messageInput");
+const copyBtn = $("copyBtn");
+const notifyBtn = $("notifyBtn");
+const installBtn = $("installBtn");
+const statusBar = $("statusBar");
+let deferredInstallPrompt = null;
+const toolDrawer = $("toolDrawer");
+const emojiPanel = $("emojiPanel");
+const stickersPanel = $("stickersPanel");
+const emojiGrid = $("emojiGrid");
+const stickerGallery = $("stickerGallery");
+const emptyStickers = $("emptyStickers");
+const canvas = $("stickerCanvas");
+const ctx = canvas.getContext("2d", {willReadFrequently: true});
+const canvasHint = $("canvasHint");
+const fileInput = $("stickerFile");
+const opacityRange = $("opacityRange");
+const thresholdRange = $("thresholdRange");
+const softnessRange = $("softnessRange");
+const removeMode = $("removeMode");
 
 nameInput.value = username;
+
+function showStatus(message, isError=false, timeout=4200) {
+  statusBar.textContent = message;
+  statusBar.classList.remove("hidden", "error");
+  if (isError) statusBar.classList.add("error");
+  if (timeout) setTimeout(() => statusBar.classList.add("hidden"), timeout);
+}
 
 function enterChat() {
   const value = nameInput.value.trim();
@@ -56,6 +192,8 @@ function enterChat() {
   chatPanel.classList.remove("hidden");
   input.focus();
   loadMessages();
+  loadStickers();
+  refreshNotificationButton();
 }
 
 enterBtn.addEventListener("click", enterChat);
@@ -64,35 +202,50 @@ nameInput.addEventListener("keydown", e => {
 });
 
 copyBtn.addEventListener("click", async () => {
-  await navigator.clipboard.writeText(window.location.href);
-  copyBtn.textContent = "Link copiado!";
-  setTimeout(() => copyBtn.textContent = "Copiar link", 1600);
+  try {
+    await navigator.clipboard.writeText(window.location.href);
+    showStatus("Link da sala copiado.");
+  } catch (_) {
+    prompt("Copie o link da sala:", window.location.href);
+  }
 });
 
 function addMessage(m) {
+  if (seenMessageIds.has(m.id)) return;
+  seenMessageIds.add(m.id);
   const mine = m.author === username;
   const row = document.createElement("div");
   row.className = "msg-row " + (mine ? "mine" : "other");
 
   const bubble = document.createElement("div");
-  bubble.className = "bubble";
+  bubble.className = "bubble" + (m.kind === "sticker" ? " sticker-bubble" : "");
 
   const meta = document.createElement("div");
   meta.className = "meta";
   meta.textContent = `${m.author} • ${m.time}`;
+  bubble.appendChild(meta);
 
-  const text = document.createElement("div");
-  text.className = "msg-text";
-  text.textContent = m.text;
+  if (m.kind === "sticker") {
+    const img = document.createElement("img");
+    img.className = "chat-sticker";
+    img.src = m.sticker_url;
+    img.alt = `Figurinha enviada por ${m.author}`;
+    bubble.appendChild(img);
+  } else {
+    const text = document.createElement("div");
+    text.className = "msg-text";
+    text.textContent = m.text;
+    bubble.appendChild(text);
+  }
 
-  bubble.append(meta, text);
   row.appendChild(bubble);
   messagesEl.appendChild(row);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
 async function loadMessages() {
-  if (!username) return;
+  if (!username || loadingMessages) return;
+  loadingMessages = true;
   try {
     const r = await fetch(`/api/messages/${ROOM}?after=${lastId}`, {cache: "no-store"});
     if (!r.ok) return;
@@ -101,7 +254,10 @@ async function loadMessages() {
       addMessage(m);
       lastId = Math.max(lastId, m.id);
     }
-  } catch (_) {}
+  } catch (_) {
+  } finally {
+    loadingMessages = false;
+  }
 }
 
 form.addEventListener("submit", async e => {
@@ -112,18 +268,18 @@ form.addEventListener("submit", async e => {
   input.value = "";
   input.focus();
 
-  const r = await fetch(`/api/messages/${ROOM}`, {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({author: username, text})
-  });
-
-  if (r.ok) {
-    const m = await r.json();
-    if (m.id > lastId) {
-      addMessage(m);
-      lastId = m.id;
-    }
+  try {
+    const r = await fetch(`/api/messages/${ROOM}`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({author: username, text, device_id: deviceId})
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Não foi possível enviar.");
+    await loadMessages();
+  } catch (err) {
+    input.value = text;
+    showStatus(err.message, true);
   }
 });
 
@@ -134,7 +290,361 @@ input.addEventListener("keydown", e => {
   }
 });
 
+/* ---------- Emoji ---------- */
+EMOJIS.forEach(emoji => {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "emoji-item";
+  btn.textContent = emoji;
+  btn.addEventListener("click", () => {
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+    input.focus();
+    const pos = start + emoji.length;
+    input.setSelectionRange(pos, pos);
+  });
+  emojiGrid.appendChild(btn);
+});
+
+function showTool(tab) {
+  toolDrawer.classList.remove("hidden");
+  document.querySelectorAll(".tool-tab").forEach(b => {
+    b.classList.toggle("active", b.dataset.tab === tab);
+  });
+  emojiPanel.classList.toggle("hidden", tab !== "emoji");
+  stickersPanel.classList.toggle("hidden", tab !== "stickers");
+  if (tab === "stickers") loadStickers();
+}
+
+$("emojiBtn").addEventListener("click", () => showTool("emoji"));
+$("stickerBtn").addEventListener("click", () => showTool("stickers"));
+$("closeToolsBtn").addEventListener("click", () => toolDrawer.classList.add("hidden"));
+document.querySelectorAll(".tool-tab").forEach(btn => {
+  btn.addEventListener("click", () => showTool(btn.dataset.tab));
+});
+
+/* ---------- Sticker editor ---------- */
+function scheduleRender() {
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(renderSticker, 25);
+}
+
+[opacityRange, thresholdRange, softnessRange].forEach(el => {
+  el.addEventListener("input", () => {
+    $("opacityValue").textContent = `${opacityRange.value}%`;
+    $("thresholdValue").textContent = thresholdRange.value;
+    $("softnessValue").textContent = softnessRange.value;
+    scheduleRender();
+  });
+});
+
+removeMode.addEventListener("change", () => {
+  if (removeMode.value === "dark") thresholdRange.value = "45";
+  if (removeMode.value === "light") thresholdRange.value = "210";
+  $("thresholdValue").textContent = thresholdRange.value;
+  scheduleRender();
+});
+
+fileInput.addEventListener("change", () => {
+  const file = fileInput.files?.[0];
+  if (!file) return;
+  if (!file.type.startsWith("image/")) {
+    showStatus("Escolha um arquivo de imagem.", true);
+    return;
+  }
+
+  if (stickerObjectUrl) URL.revokeObjectURL(stickerObjectUrl);
+  stickerObjectUrl = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    originalImage = img;
+    canvasHint.classList.add("hidden");
+    renderSticker();
+  };
+  img.onerror = () => showStatus("Não consegui abrir essa imagem.", true);
+  img.src = stickerObjectUrl;
+});
+
+function resetEditor() {
+  opacityRange.value = "100";
+  thresholdRange.value = "45";
+  softnessRange.value = "28";
+  removeMode.value = "none";
+  $("opacityValue").textContent = "100%";
+  $("thresholdValue").textContent = "45";
+  $("softnessValue").textContent = "28";
+  if (originalImage) renderSticker();
+}
+$("resetStickerBtn").addEventListener("click", resetEditor);
+
+function renderSticker() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!originalImage) return;
+
+  const iw = originalImage.naturalWidth || originalImage.width;
+  const ih = originalImage.naturalHeight || originalImage.height;
+  const scale = Math.max(canvas.width / iw, canvas.height / ih);
+  const dw = iw * scale;
+  const dh = ih * scale;
+  const dx = (canvas.width - dw) / 2;
+  const dy = (canvas.height - dh) / 2;
+
+  ctx.save();
+  ctx.globalAlpha = Number(opacityRange.value) / 100;
+  ctx.drawImage(originalImage, dx, dy, dw, dh);
+  ctx.restore();
+
+  const mode = removeMode.value;
+  if (mode === "none") return;
+
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  const threshold = Number(thresholdRange.value);
+  const softness = Math.max(1, Number(softnessRange.value));
+
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i+1], b = data[i+2];
+    const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    let factor = 1;
+
+    if (mode === "dark") {
+      if (luminance <= threshold) factor = 0;
+      else if (luminance < threshold + softness) {
+        factor = (luminance - threshold) / softness;
+      }
+    } else if (mode === "light") {
+      if (luminance >= threshold) factor = 0;
+      else if (luminance > threshold - softness) {
+        factor = (threshold - luminance) / softness;
+      }
+    }
+
+    data[i+3] = Math.round(data[i+3] * Math.max(0, Math.min(1, factor)));
+  }
+  ctx.putImageData(imageData, 0, 0);
+}
+
+$("saveStickerBtn").addEventListener("click", async () => {
+  if (!originalImage) {
+    showStatus("Escolha uma foto antes de salvar.", true);
+    return;
+  }
+
+  renderSticker();
+  canvas.toBlob(async blob => {
+    if (!blob) {
+      showStatus("Não consegui gerar a figurinha.", true);
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("owner", username);
+    formData.append("image", blob, "figurinha.webp");
+
+    const btn = $("saveStickerBtn");
+    btn.disabled = true;
+    btn.textContent = "Salvando...";
+    try {
+      const r = await fetch(`/api/stickers/${ROOM}`, {method: "POST", body: formData});
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "Falha ao salvar figurinha.");
+      showStatus("Figurinha salva. Agora você pode reutilizá-la.");
+      await loadStickers();
+    } catch (err) {
+      showStatus(err.message, true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Salvar figurinha";
+    }
+  }, "image/webp", 0.88);
+});
+
+async function loadStickers() {
+  try {
+    const r = await fetch(`/api/stickers/${ROOM}`, {cache: "no-store"});
+    if (!r.ok) return;
+    const stickers = await r.json();
+    stickerGallery.innerHTML = "";
+    emptyStickers.classList.toggle("hidden", stickers.length > 0);
+
+    for (const sticker of stickers) {
+      const item = document.createElement("div");
+      item.className = "saved-sticker-item";
+
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "saved-sticker";
+      btn.title = `Enviar figurinha de ${sticker.owner}`;
+
+      const img = document.createElement("img");
+      img.src = sticker.url;
+      img.alt = `Figurinha criada por ${sticker.owner}`;
+      btn.appendChild(img);
+      btn.addEventListener("click", () => sendSticker(sticker.token));
+      item.appendChild(btn);
+
+      if (sticker.owner === username) {
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "delete-sticker";
+        del.textContent = "×";
+        del.title = "Excluir figurinha";
+        del.addEventListener("click", async e => {
+          e.stopPropagation();
+          if (!confirm("Excluir esta figurinha salva?")) return;
+          const res = await fetch(`/api/stickers/${ROOM}/${sticker.token}`, {
+            method: "DELETE",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({owner: username})
+          });
+          if (res.ok) loadStickers();
+        });
+        item.appendChild(del);
+      }
+
+      stickerGallery.appendChild(item);
+    }
+  } catch (_) {}
+}
+
+async function sendSticker(token) {
+  try {
+    const r = await fetch(`/api/sticker-message/${ROOM}`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({author: username, token, device_id: deviceId})
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Não foi possível enviar a figurinha.");
+    await loadMessages();
+    toolDrawer.classList.add("hidden");
+  } catch (err) {
+    showStatus(err.message, true);
+  }
+}
+
+/* ---------- PWA + Push notifications ---------- */
+window.addEventListener("beforeinstallprompt", event => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  installBtn.classList.remove("hidden");
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  installBtn.classList.add("hidden");
+  showStatus("Nossa Sala foi instalado neste aparelho.");
+});
+
+(function setupInstallButton() {
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
+  if (isIOS && !standalone) installBtn.classList.remove("hidden");
+})();
+
+installBtn.addEventListener("click", async () => {
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    installBtn.classList.add("hidden");
+    return;
+  }
+
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  if (isIOS) {
+    showStatus("No iPhone/iPad: Safari → Compartilhar → Adicionar à Tela de Início. Depois abra o app pelo ícone.", false, 9000);
+    return;
+  }
+
+  showStatus("Use a opção “Instalar aplicativo” do menu do navegador, se ela estiver disponível.");
+});
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map(ch => ch.charCodeAt(0)));
+}
+
+async function getRegistration() {
+  if (!("serviceWorker" in navigator)) throw new Error("Este navegador não suporta Service Worker.");
+  await navigator.serviceWorker.register("/sw.js");
+  return navigator.serviceWorker.ready;
+}
+
+async function refreshNotificationButton() {
+  if (!("Notification" in window) || !("PushManager" in window)) {
+    notifyBtn.textContent = "🔕 Não suportado";
+    notifyBtn.disabled = true;
+    return;
+  }
+  if (Notification.permission === "granted") {
+    notifyBtn.textContent = "🔔 Ativas";
+  } else if (Notification.permission === "denied") {
+    notifyBtn.textContent = "🔕 Bloqueadas";
+  } else {
+    notifyBtn.textContent = "🔔 Notificações";
+  }
+}
+
+notifyBtn.addEventListener("click", async () => {
+  if (!username) {
+    showStatus("Entre na conversa antes de ativar notificações.", true);
+    return;
+  }
+  try {
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
+    if (isIOS && !standalone) {
+      showStatus("No iPhone/iPad, adicione este site à Tela de Início e abra por lá antes de ativar notificações.", true, 8000);
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") {
+      refreshNotificationButton();
+      showStatus("A permissão de notificação não foi concedida.", true);
+      return;
+    }
+
+    const registration = await getRegistration();
+    const keyResponse = await fetch("/api/push/public-key");
+    const keyData = await keyResponse.json();
+
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(keyData.publicKey)
+      });
+    }
+
+    const r = await fetch(`/api/push/subscribe/${ROOM}`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        owner: username,
+        device_id: deviceId,
+        subscription: subscription.toJSON()
+      })
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || "Não consegui registrar as notificações.");
+
+    refreshNotificationButton();
+    showStatus("Notificações ativadas neste aparelho.");
+  } catch (err) {
+    showStatus(err.message || "Falha ao ativar notificações.", true, 7000);
+  }
+});
+
 setInterval(loadMessages, 1200);
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/sw.js").catch(() => {});
+}
 
 if (username) enterChat();
 </script>
