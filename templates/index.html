@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Nossa Sala</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="home">
+  <main class="card home-card">
+    <div class="heart">♥</div>
+    <h1>Nossa Sala</h1>
+    <p>Crie uma sala privada e envie o link para quem você quiser conversar.</p>
+    <form action="/create-room" method="post">
+      <button class="primary" type="submit">Criar nova sala</button>
+    </form>
+    <p class="small">Cada sala recebe um endereço único.</p>
+  </main>
+</body>
+</html>

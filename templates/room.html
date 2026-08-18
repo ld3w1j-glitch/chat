@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Nossa Sala</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="chat-shell">
+    <header class="chat-header">
+      <div>
+        <strong>Nossa Sala ♥</strong>
+        <div class="room-code">Sala: {{ code }}</div>
+      </div>
+      <button id="copyBtn" class="secondary">Copiar link</button>
+    </header>
+
+    <section id="loginPanel" class="name-panel">
+      <h2>Como devemos chamar você?</h2>
+      <input id="nameInput" maxlength="40" autocomplete="name" placeholder="Seu nome">
+      <button id="enterBtn" class="primary">Entrar na conversa</button>
+    </section>
+
+    <section id="chatPanel" class="chat-panel hidden">
+      <div id="messages" class="messages"></div>
+      <form id="messageForm" class="composer">
+        <textarea id="messageInput" maxlength="2000" rows="1" placeholder="Digite uma mensagem..." autocomplete="off"></textarea>
+        <button class="send" type="submit">Enviar</button>
+      </form>
+    </section>
+  </main>
+
+<script>
+const ROOM = "{{ code }}";
+let username = localStorage.getItem("chat_name") || "";
+let lastId = 0;
+
+const loginPanel = document.getElementById("loginPanel");
+const chatPanel = document.getElementById("chatPanel");
+const nameInput = document.getElementById("nameInput");
+const enterBtn = document.getElementById("enterBtn");
+const messagesEl = document.getElementById("messages");
+const form = document.getElementById("messageForm");
+const input = document.getElementById("messageInput");
+const copyBtn = document.getElementById("copyBtn");
+
+nameInput.value = username;
+
+function enterChat() {
+  const value = nameInput.value.trim();
+  if (!value) return;
+  username = value.slice(0, 40);
+  localStorage.setItem("chat_name", username);
+  loginPanel.classList.add("hidden");
+  chatPanel.classList.remove("hidden");
+  input.focus();
+  loadMessages();
+}
+
+enterBtn.addEventListener("click", enterChat);
+nameInput.addEventListener("keydown", e => {
+  if (e.key === "Enter") enterChat();
+});
+
+copyBtn.addEventListener("click", async () => {
+  await navigator.clipboard.writeText(window.location.href);
+  copyBtn.textContent = "Link copiado!";
+  setTimeout(() => copyBtn.textContent = "Copiar link", 1600);
+});
+
+function addMessage(m) {
+  const mine = m.author === username;
+  const row = document.createElement("div");
+  row.className = "msg-row " + (mine ? "mine" : "other");
+
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+
+  const meta = document.createElement("div");
+  meta.className = "meta";
+  meta.textContent = `${m.author} • ${m.time}`;
+
+  const text = document.createElement("div");
+  text.className = "msg-text";
+  text.textContent = m.text;
+
+  bubble.append(meta, text);
+  row.appendChild(bubble);
+  messagesEl.appendChild(row);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+async function loadMessages() {
+  if (!username) return;
+  try {
+    const r = await fetch(`/api/messages/${ROOM}?after=${lastId}`, {cache: "no-store"});
+    if (!r.ok) return;
+    const data = await r.json();
+    for (const m of data) {
+      addMessage(m);
+      lastId = Math.max(lastId, m.id);
+    }
+  } catch (_) {}
+}
+
+form.addEventListener("submit", async e => {
+  e.preventDefault();
+  const text = input.value.trim();
+  if (!text) return;
+
+  input.value = "";
+  input.focus();
+
+  const r = await fetch(`/api/messages/${ROOM}`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({author: username, text})
+  });
+
+  if (r.ok) {
+    const m = await r.json();
+    if (m.id > lastId) {
+      addMessage(m);
+      lastId = m.id;
+    }
+  }
+});
+
+input.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    form.requestSubmit();
+  }
+});
+
+setInterval(loadMessages, 1200);
+
+if (username) enterChat();
+</script>
+</body>
+</html>
