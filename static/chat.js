@@ -21,6 +21,7 @@
   let localTyping = false;
   let typingStopTimer = null;
   let lastTypingPingAt = 0;
+  let pendingAttachment = null;
 
   const messagesEl = $("messages"), form = $("messageForm"), input = $("messageInput");
   const statusBar = $("statusBar"), notifyBtn = $("notifyBtn"), installBtn = $("installBtn");
@@ -31,6 +32,11 @@
   const replyPreview = $("replyPreview"), replyPreviewAuthor = $("replyPreviewAuthor"), replyPreviewText = $("replyPreviewText");
   const editPreview = $("editPreview"), editPreviewText = $("editPreviewText");
   const typingIndicator = $("typingIndicator");
+  const attachBtn = $("attachBtn"), attachmentMenu = $("attachmentMenu");
+  const attachImageBtn = $("attachImageBtn"), attachVideoBtn = $("attachVideoBtn"), attachDocBtn = $("attachDocBtn");
+  const attachImageInput = $("attachImageInput"), attachVideoInput = $("attachVideoInput"), attachDocInput = $("attachDocInput");
+  const attachmentPreview = $("attachmentPreview"), attachmentPreviewTitle = $("attachmentPreviewTitle"), attachmentPreviewText = $("attachmentPreviewText");
+  const sendAttachmentBtn = $("sendAttachmentBtn"), cancelAttachmentBtn = $("cancelAttachmentBtn");
 
   function showPartnerTyping(isTyping) {
     if (!typingIndicator) return;
@@ -91,11 +97,69 @@
   NossaSala.setupInstallButton(installBtn, msg => status(msg, false, 8000));
   refreshNotify();
 
+  function formatBytes(bytes) {
+    const n = Number(bytes || 0);
+    if (n < 1024) return `${n} B`;
+    if (n < 1024*1024) return `${(n/1024).toFixed(1)} KB`;
+    return `${(n/(1024*1024)).toFixed(1)} MB`;
+  }
+
   function messageSummary(m) {
     if (m.deleted || m.kind === "deleted") return "Mensagem apagada";
     if (m.kind === "sticker") return "🖼️ Figurinha";
+    if (["image","video","document"].includes(m.kind)) return m.text || "📎 Anexo";
     const text = (m.text || "").replace(/\s+/g, " ").trim();
     return text.length > 100 ? text.slice(0, 97) + "..." : text;
+  }
+
+  function hideAttachmentMenu() { if (attachmentMenu) attachmentMenu.classList.add("hidden"); }
+
+  function clearAttachment() {
+    pendingAttachment = null;
+    if (attachmentPreview) attachmentPreview.classList.add("hidden");
+    if (attachmentPreviewText) attachmentPreviewText.textContent = "";
+    if (attachImageInput) attachImageInput.value = "";
+    if (attachVideoInput) attachVideoInput.value = "";
+    if (attachDocInput) attachDocInput.value = "";
+  }
+
+  function setPendingAttachment(file, kind) {
+    if (!file) return;
+    if (editingMessage) { status("Conclua ou cancele a edição antes de anexar um arquivo.", true); return; }
+    pendingAttachment = {file, kind};
+    const icon = kind === "image" ? "🖼️" : kind === "video" ? "🎞️" : "📎";
+    attachmentPreviewTitle.textContent = `${icon} Anexo selecionado`;
+    attachmentPreviewText.textContent = `${file.name} • ${formatBytes(file.size)}`;
+    attachmentPreview.classList.remove("hidden");
+    hideAttachmentMenu();
+  }
+
+  async function sendPendingAttachment() {
+    if (!pendingAttachment) return;
+    if (editingMessage) { status("Conclua ou cancele a edição antes de anexar um arquivo.", true); return; }
+    const activeReply = replyTo;
+    const fd = new FormData();
+    fd.append("file", pendingAttachment.file);
+    fd.append("device_id", NossaSala.deviceId || "");
+    if (activeReply?.id) fd.append("reply_to_id", String(activeReply.id));
+    sendAttachmentBtn.disabled = true;
+    sendAttachmentBtn.textContent = "Enviando...";
+    try {
+      const r = await fetch(`/api/attachments/${ROOM}`, {method:"POST", body:fd});
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "Falha ao enviar anexo.");
+      clearAttachment();
+      clearReply();
+      addMessage(data);
+      lastId = Math.max(lastId, data.id);
+      await markRead();
+      status("Anexo enviado.");
+    } catch (err) {
+      status(err.message, true, 6500);
+    } finally {
+      sendAttachmentBtn.disabled = false;
+      sendAttachmentBtn.textContent = "Enviar anexo";
+    }
   }
 
   function clearReply() {
@@ -211,6 +275,44 @@
       img.src = m.sticker_url;
       img.alt = `Figurinha enviada por ${m.author}`;
       bubble.appendChild(img);
+    } else if (["image","video","document"].includes(m.kind)) {
+      const card = document.createElement("div");
+      card.className = "attachment-card";
+      if (m.kind === "image") {
+        const link = document.createElement("a");
+        link.href = m.attachment_url;
+        link.target = "_blank";
+        link.rel = "noopener";
+        const img = document.createElement("img");
+        img.className = "attachment-image";
+        img.src = m.attachment_url;
+        img.alt = m.attachment_name || "Imagem";
+        link.appendChild(img);
+        card.appendChild(link);
+      } else if (m.kind === "video") {
+        const video = document.createElement("video");
+        video.className = "attachment-video";
+        video.src = m.attachment_url;
+        video.controls = true;
+        video.preload = "metadata";
+        card.appendChild(video);
+      }
+      const open = document.createElement("a");
+      open.className = "attachment-open";
+      open.href = m.attachment_url;
+      open.target = "_blank";
+      open.rel = "noopener";
+      const metaWrap = document.createElement("div");
+      const name = document.createElement("div");
+      name.className = "attachment-name";
+      name.textContent = m.attachment_name || (m.kind === "document" ? "Documento" : "Anexo");
+      const metaLine = document.createElement("small");
+      metaLine.textContent = `${m.kind === "image" ? "Imagem" : m.kind === "video" ? "Vídeo" : "Documento"} • ${formatBytes(m.attachment_size)}`;
+      metaWrap.append(name, metaLine);
+      open.textContent = m.kind === "document" ? "📎 " : (m.kind === "image" ? "🖼️ " : "🎞️ ");
+      open.appendChild(metaWrap);
+      card.appendChild(open);
+      bubble.appendChild(card);
     } else {
       const text = document.createElement("div");
       text.className = "msg-text";
@@ -441,6 +543,20 @@
     });
     emojiGrid.appendChild(btn);
   });
+
+  attachBtn?.addEventListener("click", e => {
+    e.stopPropagation();
+    attachmentMenu.classList.toggle("hidden");
+  });
+  attachImageBtn?.addEventListener("click", () => attachImageInput.click());
+  attachVideoBtn?.addEventListener("click", () => attachVideoInput.click());
+  attachDocBtn?.addEventListener("click", () => attachDocInput.click());
+  attachImageInput?.addEventListener("change", () => setPendingAttachment(attachImageInput.files?.[0], "image"));
+  attachVideoInput?.addEventListener("change", () => setPendingAttachment(attachVideoInput.files?.[0], "video"));
+  attachDocInput?.addEventListener("change", () => setPendingAttachment(attachDocInput.files?.[0], "document"));
+  sendAttachmentBtn?.addEventListener("click", sendPendingAttachment);
+  cancelAttachmentBtn?.addEventListener("click", clearAttachment);
+  document.addEventListener("click", e => { if (!e.target.closest(".attach-menu-wrap")) hideAttachmentMenu(); });
 
   function showTool(tab) {
     toolDrawer.classList.remove("hidden");

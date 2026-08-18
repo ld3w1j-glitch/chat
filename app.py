@@ -7,6 +7,7 @@ import re
 import secrets
 import urllib.error
 import urllib.request
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
@@ -33,9 +34,26 @@ from pywebpush import WebPushException, webpush
 
 
 STICKER_PREFIX = "__STICKER__:"
+ATTACHMENT_PREFIX = "__ATTACH__:"
 MAX_STICKER_BYTES = 1_500_000
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
+MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+MAX_VIDEO_BYTES = 20 * 1024 * 1024
 ONLINE_SECONDS = 75
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{3,40}$")
+ALLOWED_DOCUMENT_MIMES = {
+    "application/pdf",
+    "text/plain",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/json",
+}
 
 
 def utcnow():
@@ -103,7 +121,7 @@ app.config.update(
     SQLALCHEMY_DATABASE_URI=get_database_url(),
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
     SQLALCHEMY_ENGINE_OPTIONS={"pool_pre_ping": True},
-    MAX_CONTENT_LENGTH=3 * 1024 * 1024,
+    MAX_CONTENT_LENGTH=22 * 1024 * 1024,
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
 )
@@ -133,6 +151,19 @@ class Sticker(db.Model):
     owner = db.Column(db.String(40), nullable=False)
     mime_type = db.Column(db.String(50), nullable=False, default="image/webp")
     image_data = db.Column(db.LargeBinary, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class Attachment(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(40), unique=True, nullable=False, index=True)
+    room_code = db.Column(db.String(20), nullable=False, index=True)
+    owner = db.Column(db.String(40), nullable=False)
+    kind = db.Column(db.String(20), nullable=False, index=True)
+    file_name = db.Column(db.String(255), nullable=False)
+    mime_type = db.Column(db.String(120), nullable=False)
+    file_size = db.Column(db.Integer, nullable=False, default=0)
+    file_data = db.Column(db.LargeBinary, nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
 
 
@@ -406,6 +437,33 @@ def sticker_token_from_message(message_text: str) -> str | None:
     return None
 
 
+def attachment_token_from_message(message_text: str) -> str | None:
+    if message_text.startswith(ATTACHMENT_PREFIX):
+        return message_text[len(ATTACHMENT_PREFIX):].strip()
+    return None
+
+
+def attachment_label(kind: str, file_name: str = "") -> str:
+    base = {
+        "image": "🖼️ Imagem",
+        "video": "🎞️ Vídeo",
+        "document": "📎 Documento",
+    }.get(kind or "", "📎 Anexo")
+    return f"{base}: {file_name}" if file_name else base
+
+
+def classify_upload(mime_type: str, file_name: str) -> tuple[str | None, int]:
+    mime = (mime_type or "").lower().strip()
+    suffix = Path((file_name or "").lower()).suffix
+    if mime.startswith("image/"):
+        return "image", MAX_IMAGE_BYTES
+    if mime.startswith("video/"):
+        return "video", MAX_VIDEO_BYTES
+    if mime in ALLOWED_DOCUMENT_MIMES or suffix in {".pdf", ".txt", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".zip", ".json"}:
+        return "document", MAX_DOCUMENT_BYTES
+    return None, 0
+
+
 def latest_message_event(message: Message) -> MessageEvent | None:
     return (
         MessageEvent.query
@@ -435,6 +493,17 @@ def message_preview(message: Message) -> dict:
     token = sticker_token_from_message(state["text"])
     if token:
         return {"id": message.id, "author": message.author, "kind": "sticker", "text": "🖼️ Figurinha"}
+    attachment_token = attachment_token_from_message(state["text"])
+    if attachment_token:
+        attachment = Attachment.query.filter_by(token=attachment_token, room_code=message.room_code).first()
+        if attachment:
+            return {
+                "id": message.id,
+                "author": message.author,
+                "kind": attachment.kind,
+                "text": attachment_label(attachment.kind, attachment.file_name),
+            }
+        return {"id": message.id, "author": message.author, "kind": "document", "text": "📎 Anexo"}
     text_value = state["text"].strip().replace("\n", " ")
     if len(text_value) > 180:
         text_value = text_value[:177] + "..."
@@ -473,8 +542,24 @@ def serialize_message(message: Message) -> dict:
             "sticker_token": token,
             "sticker_url": url_for("get_sticker_image", token=token),
         })
-    else:
-        data.update({"kind": "text", "text": state["text"]})
+        return data
+
+    attachment_token = attachment_token_from_message(state["text"])
+    if attachment_token:
+        attachment = Attachment.query.filter_by(token=attachment_token, room_code=message.room_code).first()
+        if attachment:
+            data.update({
+                "kind": attachment.kind,
+                "text": attachment_label(attachment.kind, attachment.file_name),
+                "attachment_token": attachment.token,
+                "attachment_url": url_for("get_attachment_file", token=attachment.token),
+                "attachment_name": attachment.file_name,
+                "attachment_mime": attachment.mime_type,
+                "attachment_size": attachment.file_size,
+            })
+            return data
+
+    data.update({"kind": "text", "text": state["text"]})
     return data
 
 
@@ -1139,7 +1224,7 @@ def send_message(code):
         reply_target = validate_reply_target(code, data.get("reply_to_id"))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
-    if message_text.startswith(STICKER_PREFIX):
+    if message_text.startswith((STICKER_PREFIX, ATTACHMENT_PREFIX)):
         message_text = " " + message_text
     message = Message(room_code=code, author=user.username, text=message_text)
     db.session.add(message)
@@ -1200,7 +1285,7 @@ def edit_message(code, message_id):
     new_text = (data.get("text") or "").strip()[:2000]
     if not new_text:
         return jsonify({"error": "A mensagem não pode ficar vazia."}), 400
-    if new_text.startswith(STICKER_PREFIX):
+    if new_text.startswith((STICKER_PREFIX, ATTACHMENT_PREFIX)):
         new_text = " " + new_text
 
     db.session.add(MessageEvent(message_id=message.id, event_type="edit", text=new_text))
@@ -1312,11 +1397,88 @@ def send_sticker_message(code):
     db.session.flush()
     if reply_target:
         db.session.add(MessageReply(message_id=message.id, replied_to_message_id=reply_target.id))
+    clear_typing_state(conv.id, user.id)
+    user.last_seen = utcnow()
     db.session.commit()
     partner = partner_for(conv, user)
     if partner:
         send_user_push(partner.id, f"{user.full_name} • Nossa Sala", "enviou uma figurinha 🖼️", url_for("conversation", code=code), f"chat-{code}", sender_device_id)
     return jsonify(serialize_message(message)), 201
+
+
+@app.post("/api/attachments/<code>")
+@login_required
+def send_attachment_message(code):
+    user = current_user()
+    conv = conversation_for_user(code, user)
+    if not conv:
+        return jsonify({"error": "Acesso negado."}), 403
+
+    upload = request.files.get("file")
+    if upload is None:
+        return jsonify({"error": "Arquivo obrigatório."}), 400
+
+    file_name = (upload.filename or "anexo").strip()[:255] or "anexo"
+    kind, limit = classify_upload(upload.mimetype or "", file_name)
+    if not kind:
+        return jsonify({"error": "Tipo de arquivo não suportado. Envie documento, imagem ou vídeo."}), 400
+
+    raw = upload.read(limit + 1)
+    if not raw:
+        return jsonify({"error": "O arquivo está vazio."}), 400
+    if len(raw) > limit:
+        max_mb = limit / (1024 * 1024)
+        return jsonify({"error": f"O arquivo ultrapassou o limite de {max_mb:.0f} MB para este tipo."}), 413
+
+    try:
+        reply_target = validate_reply_target(code, request.form.get("reply_to_id"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    sender_device_id = (request.form.get("device_id") or "").strip()[:80]
+    token = secrets.token_urlsafe(14).replace("-", "").replace("_", "")
+    attachment = Attachment(
+        token=token,
+        room_code=code,
+        owner=user.username,
+        kind=kind,
+        file_name=file_name,
+        mime_type=(upload.mimetype or "application/octet-stream")[:120],
+        file_size=len(raw),
+        file_data=raw,
+    )
+    db.session.add(attachment)
+    db.session.flush()
+
+    message = Message(room_code=code, author=user.username, text=f"{ATTACHMENT_PREFIX}{attachment.token}")
+    db.session.add(message)
+    db.session.flush()
+    if reply_target:
+        db.session.add(MessageReply(message_id=message.id, replied_to_message_id=reply_target.id))
+    clear_typing_state(conv.id, user.id)
+    user.last_seen = utcnow()
+    db.session.commit()
+
+    partner = partner_for(conv, user)
+    if partner:
+        label = {"image": "enviou uma imagem 🖼️", "video": "enviou um vídeo 🎞️", "document": "enviou um documento 📎"}.get(kind, "enviou um anexo 📎")
+        send_user_push(partner.id, f"{user.full_name} • Nossa Sala", label, url_for("conversation", code=code), f"chat-{code}", sender_device_id)
+    return jsonify(serialize_message(message)), 201
+
+
+@app.get("/attachment/<token>")
+@login_required
+def get_attachment_file(token):
+    user = current_user()
+    attachment = Attachment.query.filter_by(token=token).first()
+    if not attachment or not conversation_for_user(attachment.room_code, user):
+        return "Anexo não encontrado", 404
+    response = Response(attachment.file_data, mimetype=attachment.mime_type or "application/octet-stream")
+    disposition = "inline" if attachment.kind in {"image", "video"} else "attachment"
+    safe_name = attachment.file_name.replace('\"', "")
+    response.headers["Content-Disposition"] = f"{disposition}; filename=\"{safe_name}\""
+    response.headers["Cache-Control"] = "private, max-age=86400"
+    return response
 
 
 @app.get("/api/push/public-key")

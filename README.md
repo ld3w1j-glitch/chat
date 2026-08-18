@@ -182,3 +182,10 @@ Sem `DATABASE_URL`, o sistema usa SQLite local apenas para desenvolvimento.
 - O estado é renovado enquanto há atividade no campo de mensagem.
 - Ele some automaticamente após alguns segundos sem digitação, ao enviar a mensagem, perder o foco, trocar de aba ou fechar a conversa.
 - O estado usa o PostgreSQL com expiração por timestamp, evitando ficar preso em “digitando…” após quedas de conexão ou reinícios.
+
+
+## Novidade
+
+- Botão **+** ao lado do chat para anexar **documento, imagem ou vídeo**.
+- Os anexos são salvos no PostgreSQL, mantendo a persistência entre deploys no Railway.
+- Limites: imagens até 10 MB, documentos até 10 MB e vídeos até 20 MB.
