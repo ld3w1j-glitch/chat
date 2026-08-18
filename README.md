@@ -212,3 +212,18 @@ O painel Admin possui uma seção **Modelos de Fofoca** com:
 - Persistência dos arquivos no Railway Volume (`RAILWAY_VOLUME_MOUNT_PATH/fofoca_frames`).
 
 Cada pasta utiliza `modelo.json`. Molduras criadas graficamente podem usar `mode: overlay` e um `overlay.png` 1080x1350. A foto é desenhada na região definida em `photo` e a única parte editável pelo usuário permanece a manchete definida por `headline`.
+
+
+## Molduras em PNG
+
+Nesta versão, as molduras de Fofoca usam **PNG**.
+Cada modelo deve ter a estrutura:
+
+```
+minha_moldura/
+├── modelo.json
+└── overlay.png
+```
+
+Edite o `overlay.png` no Photoshop.
+O `modelo.json` continua sendo usado apenas para posição e estilo da manchete.

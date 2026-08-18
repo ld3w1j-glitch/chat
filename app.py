@@ -154,42 +154,30 @@ def fofoca_frames_dir() -> Path:
     return base
 
 
+def packaged_fofoca_overlay_path(frame_id: str) -> Path:
+    return Path(app.root_path) / "static" / "fofoca_default_overlays" / f"{frame_id}.png"
+
+
 def default_fofoca_models() -> list[dict]:
-    def model(model_id, name, banner, badge, badge_text, headline_bg, headline_text, kicker):
+    def model(model_id, name, headline_text):
         return {
             "schema_version": 1,
             "id": model_id,
             "name": name,
-            "mode": "generated",
+            "mode": "overlay",
             "canvas": {"width": 1080, "height": 1350, "background": "#0f1720"},
             "photo": {"x": 0, "y": 0, "width": 1080, "height": 760},
-            "header": {
-                "x": 0, "y": 0, "width": 1080, "height": 118,
-                "color": banner, "title": "FOFOCA", "subtitle": kicker,
-                "title_color": "#ffffff", "subtitle_color": "#ffffff"
-            },
-            "card": {
-                "x": 52, "y": 790, "width": 976, "height": 470,
-                "background": headline_bg, "radius": 34
-            },
-            "badge": {
-                "x": 86, "y": 818, "width": 280, "height": 56,
-                "background": badge, "color": badge_text, "text": "NOTÍCIA"
-            },
             "headline": {
                 "x": 94, "y": 940, "max_width": 892, "line_height": 84,
                 "max_lines": 4, "font_size": 70, "color": headline_text,
                 "uppercase": True, "font_weight": 800
             },
-            "footer": {
-                "x": 96, "y": 1218, "text": "Compartilhado no Nossa Sala",
-                "font_size": 24, "color": "#475569"
-            }
+            "overlay": "overlay.png"
         }
     return [
-        model("plantao", "Plantão", "#b3261e", "#ffdfdf", "#7e1611", "#ffffff", "#111827", "PLANTÃO DA FOFOCA"),
-        model("manchete", "Manchete", "#1f3a5f", "#d9e7ff", "#163152", "#f8fafc", "#0f172a", "MANCHETE DO DIA"),
-        model("urgente", "Urgente", "#8a5a10", "#fff2d6", "#704300", "#fffaf0", "#18181b", "URGENTE"),
+        model("plantao", "Plantão", "#111827"),
+        model("manchete", "Manchete", "#0f172a"),
+        model("urgente", "Urgente", "#18181b"),
     ]
 
 
@@ -202,9 +190,9 @@ def validate_fofoca_model(data: dict) -> dict:
     name = str(data.get("name") or "").strip()[:80]
     if not name:
         raise ValueError(f"A moldura {model_id} precisa ter um nome.")
-    mode = str(data.get("mode") or "generated").strip().lower()
+    mode = str(data.get("mode") or "overlay").strip().lower()
     if mode not in {"generated", "overlay"}:
-        raise ValueError(f"Modo inválido na moldura {model_id}. Use generated ou overlay.")
+        raise ValueError(f"Modo inválido na moldura {model_id}. Use overlay.")
 
     canvas = data.get("canvas") or {}
     if int(canvas.get("width") or 0) != 1080 or int(canvas.get("height") or 0) != 1350:
@@ -238,10 +226,13 @@ def ensure_default_fofoca_models() -> None:
     for model in default_fofoca_models():
         folder = root / model["id"]
         config_path = folder / "modelo.json"
-        if config_path.exists():
-            continue
         folder.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(json.dumps(model, ensure_ascii=False, indent=2), encoding="utf-8")
+        if not config_path.exists():
+            config_path.write_text(json.dumps(model, ensure_ascii=False, indent=2), encoding="utf-8")
+        overlay_path = folder / "overlay.png"
+        packaged = packaged_fofoca_overlay_path(model["id"])
+        if not overlay_path.exists() and packaged.exists():
+            overlay_path.write_bytes(packaged.read_bytes())
 
 
 
@@ -1044,13 +1035,13 @@ COMO CRIAR UMA NOVA MOLDURA
 IMPORTANTE
 - A única informação editável pelo usuário no chat continua sendo a notícia/manchete.
 - Modelos com o mesmo id são substituídos na importação.
-- O arquivo overlay.png é opcional em modelos generated e obrigatório em modelos overlay.
+- O arquivo overlay.png é obrigatório para cada moldura.
 - Canvas suportado: 1080 x 1350 px.
 
 CAMPOS PRINCIPAIS DO modelo.json
 id: identificador único, ex.: revista_bairro
 name: nome que aparecerá no menu
-mode: generated ou overlay
+mode: overlay
 photo: x, y, width, height da foto
 headline: x, y, max_width, line_height, max_lines, font_size, color
 """
