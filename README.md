@@ -139,3 +139,8 @@ Nossa_Sala_PWA_Figurinhas/
 ## Privacidade
 
 A sala usa um endereço aleatório, mas esta versão ainda não tem criptografia ponta a ponta nem autenticação forte. Quem tiver o link completo consegue abrir a sala. Para maior privacidade, a próxima evolução pode adicionar senha da sala e dois perfis autorizados.
+
+## Correção Railway - dependências
+
+Esta versão fixa as dependências usadas no deploy para evitar conflito do resolvedor do pip.
+O pywebpush 2.4.0 requer cryptography >= 47.0.0, então o projeto usa cryptography 47.0.0.
