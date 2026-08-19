@@ -318,3 +318,8 @@ A interface usa principalmente três tons da paleta escolhida:
 - `#42E0ED` — ações e elementos interativos.
 
 Os tons `#ED42A6` e `#EDD742` são usados apenas em pequenos destaques como Fofoca, alertas e indicação de turno nos jogos.
+
+
+## Truco — Vira em destaque
+
+A carta **Vira** agora aparece em tamanho grande na mesa, com o valor/rank bem visível e a **Manilha** destacada logo ao lado.

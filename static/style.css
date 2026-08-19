@@ -136,3 +136,16 @@ html,body{background:
 .state-pill.active{background:rgba(66,224,237,.10);color:#aef5fa}
 .state-pill:not(.active){background:rgba(152,93,128,.14);color:#e2bfd4}
 .whatsapp-state.warning{background:rgba(237,215,66,.10);color:#f2e9a1;border-color:rgba(237,215,66,.28)}
+
+
+/* Truco Paulista — Vira em destaque */
+.truco-vira-zone{display:grid;grid-template-columns:auto auto;grid-template-areas:"label card" "manilha card";align-items:center;justify-content:center;gap:8px 18px;padding:18px;border:1px solid var(--border);border-radius:20px;background:linear-gradient(145deg,rgba(86,108,110,.22),rgba(152,93,128,.13));}
+.vira-label{grid-area:label;align-self:end;font-size:13px;font-weight:800;letter-spacing:.18em;color:var(--muted);text-align:right;}
+.vira-card{grid-area:card;width:132px;height:184px;border-radius:18px;border:3px solid rgba(255,255,255,.82);background:#f7f3ea;color:#15171b;display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 10px 26px rgba(0,0,0,.22);}
+.vira-card.red{color:#a72d35;}
+.vira-rank{font-size:72px;line-height:.95;font-weight:900;letter-spacing:-.06em;}
+.vira-suit{font-size:54px;line-height:1;margin-top:8px;}
+.manilha-highlight{grid-area:manilha;align-self:start;min-width:130px;text-align:right;display:flex;flex-direction:column;gap:2px;}
+.manilha-highlight span{font-size:11px;font-weight:800;letter-spacing:.13em;color:var(--muted);}
+.manilha-highlight strong{font-size:38px;line-height:1;color:var(--accent2);}
+@media(max-width:600px){.truco-vira-zone{gap:6px 14px;padding:14px}.vira-card{width:118px;height:164px}.vira-rank{font-size:66px}.vira-suit{font-size:48px}.manilha-highlight strong{font-size:34px}}

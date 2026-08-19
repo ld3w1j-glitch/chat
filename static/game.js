@@ -21,7 +21,35 @@
     const note=document.createElement('div');note.className='game-help';note.textContent=s.forced_from?'Você capturou uma peça: continue com a peça destacada.':'Capturas são obrigatórias quando disponíveis. As damas coroadas movem uma casa diagonal em qualquer direção.';boardEl.appendChild(note);
   }
   function cardHtml(card, playable=false){const red=['♦','♥'].includes(card.suit);return `<button class="playing-card ${red?'red':''} ${playable?'':'disabled'}" ${playable?'':'disabled'} data-card="${escapeHtml(card.id)}" type="button"><span class="card-rank">${escapeHtml(card.rank)}</span><span class="card-suit">${escapeHtml(card.suit)}</span></button>`;}
-  function renderTruco(g){const s=g.state;const wrap=document.createElement('div');wrap.className='truco-table';const score=s.score||{};wrap.innerHTML=`<div class="truco-score"><div><span>Você</span><strong>${Number(score[String(USER)]||0)}</strong></div><div><span>${escapeHtml(g.opponent_name)}</span><strong>${Number(score[String(g.opponent_id)]||0)}</strong></div></div><div class="truco-info"><span>Mão ${Number(s.hand_no||1)}</span><span>Vira: <b>${escapeHtml(s.vira?.rank||'')}${escapeHtml(s.vira?.suit||'')}</b></span><span>Manilha: <b>${escapeHtml(s.manilha_rank||'')}</b></span></div><div class="opponent-hand"><small>Cartas de ${escapeHtml(g.opponent_name)}</small><div class="card-row">${'<span class="card-back">◆</span>'.repeat(Number(s.opponent_card_count||0))}</div></div><div class="truco-played"><small>Mesa</small><div class="played-row">${(s.played||[]).slice(-2).map(p=>`<div class="played-card"><span>${p.user_id===USER?'Você':escapeHtml(g.opponent_name)}</span>${cardHtml(p.card,false)}</div>`).join('')||'<span class="muted">Nenhuma carta nesta rodada.</span>'}</div></div><div class="my-hand"><small>Suas cartas</small><div class="card-row" id="myCards">${(s.my_hand||[]).map(c=>cardHtml(c,g.is_my_turn&&g.status==='active')).join('')}</div></div>${s.last_hand_result?`<div class="game-help">${escapeHtml(s.last_hand_result)}</div>`:''}<div class="game-help">Modo básico: 3 cartas por mão, vira/manilha e placar até 12. A opção de pedir Truco pode ser adicionada depois.</div>`;boardEl.replaceChildren(wrap);wrap.querySelectorAll('.playing-card:not(.disabled)').forEach(btn=>btn.addEventListener('click',()=>sendMove({card_id:btn.dataset.card})));}
+  function renderTruco(g){
+    const s=g.state;
+    const wrap=document.createElement('div');
+    wrap.className='truco-table';
+    const score=s.score||{};
+    const vira=s.vira||{};
+    const viraRed=['♦','♥'].includes(vira.suit);
+    wrap.innerHTML=`
+      <div class="truco-score">
+        <div><span>Você</span><strong>${Number(score[String(USER)]||0)}</strong></div>
+        <div><span>${escapeHtml(g.opponent_name)}</span><strong>${Number(score[String(g.opponent_id)]||0)}</strong></div>
+      </div>
+      <div class="truco-info"><span>Mão ${Number(s.hand_no||1)}</span></div>
+      <section class="truco-vira-zone" aria-label="Carta vira e manilha">
+        <div class="vira-label">VIRA</div>
+        <div class="vira-card ${viraRed?'red':''}">
+          <span class="vira-rank">${escapeHtml(vira.rank||'?')}</span>
+          <span class="vira-suit">${escapeHtml(vira.suit||'')}</span>
+        </div>
+        <div class="manilha-highlight"><span>MANILHA</span><strong>${escapeHtml(s.manilha_rank||'?')}</strong></div>
+      </section>
+      <div class="opponent-hand"><small>Cartas de ${escapeHtml(g.opponent_name)}</small><div class="card-row">${'<span class="card-back">◆</span>'.repeat(Number(s.opponent_card_count||0))}</div></div>
+      <div class="truco-played"><small>Mesa</small><div class="played-row">${(s.played||[]).slice(-2).map(p=>`<div class="played-card"><span>${p.user_id===USER?'Você':escapeHtml(g.opponent_name)}</span>${cardHtml(p.card,false)}</div>`).join('')||'<span class="muted">Nenhuma carta nesta rodada.</span>'}</div></div>
+      <div class="my-hand"><small>Suas cartas</small><div class="card-row" id="myCards">${(s.my_hand||[]).map(c=>cardHtml(c,g.is_my_turn&&g.status==='active')).join('')}</div></div>
+      ${s.last_hand_result?`<div class="game-help">${escapeHtml(s.last_hand_result)}</div>`:''}
+      <div class="game-help">Modo básico: 3 cartas por mão, vira/manilha e placar até 12. A opção de pedir Truco pode ser adicionada depois.</div>`;
+    boardEl.replaceChildren(wrap);
+    wrap.querySelectorAll('.playing-card:not(.disabled)').forEach(btn=>btn.addEventListener('click',()=>sendMove({card_id:btn.dataset.card})));
+  }
   function renderHistory(g){const moves=g.recent_moves||[];historyEl.innerHTML='';if(!moves.length){historyEl.innerHTML='<div class="empty-state">A partida ainda não tem jogadas.</div>';return;}for(const m of moves.slice().reverse()){const row=document.createElement('div');row.className='game-move-row';row.innerHTML=`<strong>${escapeHtml(m.player_name)}</strong><span>${escapeHtml(m.summary)}</span><small>${new Date(m.created_at).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</small>`;historyEl.appendChild(row);}}
   function gameChatTime(value){try{return new Date(value).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}catch(_){return '';}}
   function appendGameChatMessage(m,scroll=true){
