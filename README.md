@@ -308,3 +308,13 @@ Cada partida agora possui um chat próprio. As mensagens:
 - permanecem salvas mesmo quando o outro jogador está offline;
 - aparecem ao vivo por polling quando os dois estão conectados;
 - disparam Web Push para o adversário quando as notificações estão ativadas.
+
+
+## Nova paleta visual
+
+A interface usa principalmente três tons da paleta escolhida:
+- `#566C6E` — base e bordas;
+- `#985D80` — superfícies secundárias;
+- `#42E0ED` — ações e elementos interativos.
+
+Os tons `#ED42A6` e `#EDD742` são usados apenas em pequenos destaques como Fofoca, alertas e indicação de turno nos jogos.

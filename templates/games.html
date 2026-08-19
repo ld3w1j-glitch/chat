@@ -1,5 +1,5 @@
 <!doctype html><html lang="pt-BR"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#1e2633"><title>Jogos • Nossa Sala</title>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#182224"><title>Jogos • Nossa Sala</title>
 <link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/static/icons/icon-192.png"><link rel="apple-touch-icon" href="/static/icons/icon-192.png"><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
 <body><main class="app-shell">
 <header class="app-header"><div class="header-profile"><a class="back-mini" href="{{ url_for('dashboard') }}">‹</a><a class="avatar profile-avatar-link" href="{{ url_for('profile_settings') }}">{% if user_photo_url %}<img src="{{ user_photo_url }}" alt="Foto de {{ user.full_name }}">{% else %}{{ user.full_name[0]|upper }}{% endif %}</a><div><strong>Modo Jogos</strong><div class="room-code">Partidas privadas por turnos • @{{ user.username }}</div></div></div><div class="header-actions"><a class="secondary compact link-button" href="{{ url_for('dashboard') }}">Conversas</a><a class="secondary compact link-button" href="{{ url_for('profile_settings') }}">Perfil</a></div></header>

@@ -1,4 +1,4 @@
-:root{--bg:#0d1014;--panel:#161b22;--panel2:#202733;--panel3:#131820;--text:#edf1f5;--muted:#98a3b3;--accent:#637083;--accent2:#8793a3;--mine:#3a4654;--other:#242b35;--border:#303945;--danger:#d46c6c;--success:#62c58a}
+:root{--bg:#101718;--panel:#182224;--panel2:#223033;--panel3:#141d1f;--text:#eef4f4;--muted:#a8b6b7;--accent:#42E0ED;--accent2:#985D80;--accent3:#EDD742;--accent4:#ED42A6;--base:#566C6E;--mine:#24474b;--other:#3b3039;--border:#405558;--danger:#ED42A6;--success:#42E0ED}
 *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:Inter,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--text)}body{min-height:100vh}button,input,textarea,select{font:inherit}button{touch-action:manipulation}a{color:inherit}
 .home{display:grid;place-items:center;padding:20px;background:radial-gradient(circle at 20% 20%,rgba(99,112,131,.10),transparent 30%),radial-gradient(circle at 80% 80%,rgba(135,147,163,.05),transparent 28%),var(--bg)}
 .card,.panel-section{background:rgba(26,29,39,.97);border:1px solid var(--border);border-radius:22px}.home-card{width:min(500px,100%);padding:44px;text-align:center}.auth-card{width:min(460px,100%);padding:34px}.wide-auth{width:min(720px,100%)}.heart{font-size:44px;color:var(--accent);margin-bottom:6px;text-align:center}h1{font-size:30px;margin:8px 0 12px}h2{font-size:21px;margin:0}p{color:var(--muted);line-height:1.55}.small{font-size:13px}.muted{color:var(--muted);font-size:13px}
@@ -57,3 +57,82 @@ button,.link-button{border:0;border-radius:13px;padding:12px 16px;font-weight:70
 
 /* Chat privado dentro da partida */
 .game-chat-panel{display:flex;flex-direction:column;min-height:320px}.game-chat-messages{height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:8px;border:1px solid var(--border);border-radius:14px;background:#11151d}.game-chat-row{display:flex;align-items:flex-end;gap:7px;max-width:92%}.game-chat-row.mine{align-self:flex-end;flex-direction:row-reverse}.game-chat-row.other{align-self:flex-start}.game-chat-avatar{width:28px;height:28px;border-radius:50%;overflow:hidden;display:grid;place-items:center;flex:0 0 28px;background:var(--panel2);color:var(--muted);font-size:12px;font-weight:700}.game-chat-avatar img{width:100%;height:100%;object-fit:cover}.game-chat-bubble{min-width:0;padding:8px 10px;border-radius:14px;background:var(--other);border-bottom-left-radius:4px}.game-chat-row.mine .game-chat-bubble{background:var(--mine);border-bottom-left-radius:14px;border-bottom-right-radius:4px}.game-chat-meta{display:flex;align-items:center;gap:8px;margin-bottom:3px;font-size:10px;color:var(--muted)}.game-chat-meta strong{color:inherit}.game-chat-meta time{white-space:nowrap}.game-chat-text{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.35;font-size:13px}.game-chat-form{display:flex;align-items:flex-end;gap:8px;margin-top:9px}.game-chat-form textarea{flex:1;resize:none;min-height:42px;max-height:110px;padding:10px 12px;border-radius:13px;border:1px solid var(--border);background:var(--panel2);color:white;outline:none}.game-chat-form button{min-height:42px}.game-chat-empty{margin:auto;width:100%}@media(max-width:720px){.game-chat-messages{height:260px}.game-chat-form{align-items:stretch}.game-chat-form button{align-self:flex-end}.game-chat-row{max-width:96%}}
+
+
+/* ===== Paleta Adobe: equilíbrio entre #566C6E, #985D80 e #42E0ED ===== */
+html,body{background:
+  radial-gradient(circle at 12% 8%,rgba(66,224,237,.07),transparent 28%),
+  radial-gradient(circle at 88% 92%,rgba(152,93,128,.08),transparent 30%),
+  var(--bg)}
+.home{background:
+  radial-gradient(circle at 18% 22%,rgba(66,224,237,.11),transparent 32%),
+  radial-gradient(circle at 82% 78%,rgba(152,93,128,.11),transparent 31%),
+  linear-gradient(145deg,#101718,#151d1f 60%,#17171c)}
+.card,.panel-section,.profile-card,.game-board-panel{background:linear-gradient(155deg,rgba(31,43,45,.98),rgba(24,34,36,.98));border-color:rgba(86,108,110,.68)}
+.app-shell,.admin-shell,.chat-shell{background:linear-gradient(180deg,#101718,#12191b)}
+.app-header,.chat-header{background:linear-gradient(90deg,rgba(27,39,41,.98),rgba(31,31,38,.98));border-bottom-color:rgba(86,108,110,.62)}
+
+.primary,.send{background:linear-gradient(135deg,#397f84,#76506a);color:#f8ffff;border:1px solid rgba(66,224,237,.24);box-shadow:inset 0 1px 0 rgba(255,255,255,.05)}
+.primary:hover,.send:hover{filter:brightness(1.08)}
+.secondary{background:linear-gradient(145deg,rgba(86,108,110,.22),rgba(152,93,128,.13));border-color:rgba(86,108,110,.72)}
+.secondary:hover,.icon-btn:hover{border-color:rgba(66,224,237,.52)}
+.auth-links a,.typing-indicator,.reply-preview strong{color:#73dce3}
+.stack-form input:focus,.stack-form textarea:focus,.inline-reset input:focus,.composer textarea:focus,.game-chat-form textarea:focus{border-color:#42E0ED;box-shadow:0 0 0 2px rgba(66,224,237,.08)}
+
+.avatar,.profile-photo-large{background:linear-gradient(145deg,rgba(66,224,237,.28),rgba(152,93,128,.35));border-color:rgba(86,108,110,.72)}
+.online-dot{background:#42E0ED;box-shadow:0 0 0 3px rgba(66,224,237,.13)}
+.presence.online,.live-badge{color:#86edf4}
+.live-badge{background:rgba(66,224,237,.10);border-color:rgba(66,224,237,.28)}
+.count-badge{background:rgba(86,108,110,.22)}
+
+.person-row,.conversation-row,.game-list-row,.request-card{background:linear-gradient(145deg,rgba(27,38,40,.98),rgba(39,31,38,.93));border-color:rgba(86,108,110,.55)}
+.person-row:hover,.conversation-row:hover,.game-list-row:hover{border-color:rgba(66,224,237,.44);background:linear-gradient(145deg,rgba(30,45,47,.98),rgba(45,34,43,.96))}
+.invite-card{background:linear-gradient(135deg,rgba(152,93,128,.20),rgba(66,224,237,.08));border-color:rgba(152,93,128,.50)}
+
+.messages{background:
+  linear-gradient(rgba(16,23,24,.91),rgba(16,23,24,.91)),
+  radial-gradient(circle at 25% 18%,rgba(66,224,237,.13),transparent 24%),
+  radial-gradient(circle at 82% 76%,rgba(152,93,128,.14),transparent 27%)}
+.mine .bubble{background:linear-gradient(145deg,rgba(42,92,97,.95),rgba(43,74,77,.95));border:1px solid rgba(66,224,237,.20)}
+.other .bubble{background:linear-gradient(145deg,rgba(66,49,61,.96),rgba(53,44,52,.96));border:1px solid rgba(152,93,128,.22)}
+.composer-shell{background:linear-gradient(90deg,#172224,#211d23);border-top-color:rgba(86,108,110,.56)}
+.composer textarea,.game-chat-form textarea{background:#1d292b;border-color:rgba(86,108,110,.60)}
+.icon-btn{background:linear-gradient(145deg,rgba(86,108,110,.22),rgba(152,93,128,.12));border-color:rgba(86,108,110,.60)}
+.tool-drawer,.tool-tabs,.attachment-menu{background:#141d1f}
+.tool-tab.active{border-color:rgba(66,224,237,.30);box-shadow:inset 0 -2px 0 rgba(66,224,237,.55)}
+.reply-preview{background:linear-gradient(90deg,rgba(66,224,237,.09),rgba(152,93,128,.09));border-left-color:#42E0ED}
+.edit-preview{border-left-color:#EDD742}
+.attachment-preview{border-left-color:#985D80}
+#attachFofocaBtn{color:#f1b6d8;border-color:rgba(237,66,166,.20)}
+
+/* Fofoca: rosa só como identificação discreta */
+.fofoca-composer{background:linear-gradient(145deg,#151f20,#201a20);border-top-color:rgba(237,66,166,.22)}
+.fofoca-header strong{color:#efacd1}
+.fofoca-controls,.fofoca-preview{background:linear-gradient(145deg,rgba(29,41,43,.98),rgba(44,34,42,.94));border-color:rgba(86,108,110,.55)}
+
+/* Jogos: ciano para ação, amarelo para indicar turno */
+.game-header-icon,.game-list-icon{background:linear-gradient(145deg,rgba(66,224,237,.14),rgba(152,93,128,.17));border-color:rgba(86,108,110,.60)}
+.game-turn-pill.mine{background:rgba(237,215,66,.12);color:#f2e679;border-color:rgba(237,215,66,.34)}
+.game-turn-banner{background:linear-gradient(90deg,rgba(86,108,110,.18),rgba(152,93,128,.12))}
+.game-turn-banner.mine{background:linear-gradient(90deg,rgba(237,215,66,.12),rgba(66,224,237,.09));color:#f0e98f;border-color:rgba(237,215,66,.32)}
+.ttt-cell{background:linear-gradient(145deg,rgba(34,48,51,.98),rgba(52,41,49,.96))}
+.ttt-cell:not(:disabled):hover{border-color:#42E0ED}
+.checkers-board{border-color:#566C6E}
+.checker-cell.light{background:#9ca9a6}.checker-cell.dark{background:#4e6062}
+.checker-cell.forced{box-shadow:inset 0 0 0 5px rgba(237,215,66,.78)}
+.checker-piece.side-a{background:#2d4e52;color:#EDD742;border-color:rgba(66,224,237,.30)}
+.checker-piece.side-b{background:#8c607a;color:#fff;border-color:rgba(237,66,166,.16)}
+.truco-score>div,.truco-info span{background:linear-gradient(145deg,rgba(86,108,110,.18),rgba(152,93,128,.10))}
+
+/* Chat das partidas */
+.game-chat-messages{background:linear-gradient(180deg,#11191a,#17191d);border-color:rgba(86,108,110,.55)}
+.game-chat-row.mine .game-chat-bubble{background:linear-gradient(145deg,rgba(42,92,97,.96),rgba(43,74,77,.96));border:1px solid rgba(66,224,237,.18)}
+.game-chat-row.other .game-chat-bubble{background:linear-gradient(145deg,rgba(66,49,61,.96),rgba(53,44,52,.96));border:1px solid rgba(152,93,128,.20)}
+.game-chat-avatar{background:linear-gradient(145deg,rgba(66,224,237,.18),rgba(152,93,128,.22))}
+
+/* Estados e pequenos acentos */
+.status-bar,.flash.success,.whatsapp-state{background:rgba(66,224,237,.09);color:#baf7fb;border-color:rgba(66,224,237,.24)}
+.flash.error,.status-bar.error,.danger-btn{background:rgba(237,66,166,.10);color:#ffcbe8;border-color:rgba(237,66,166,.28)}
+.state-pill.active{background:rgba(66,224,237,.10);color:#aef5fa}
+.state-pill:not(.active){background:rgba(152,93,128,.14);color:#e2bfd4}
+.whatsapp-state.warning{background:rgba(237,215,66,.10);color:#f2e9a1;border-color:rgba(237,215,66,.28)}
