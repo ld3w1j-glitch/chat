@@ -583,11 +583,7 @@ class GameMove(db.Model):
 
 
 class GameChatMessage(db.Model):
-    """Mensagens privadas vinculadas a uma única partida.
-
-    O chat continua disponível mesmo depois de a partida terminar e todas as
-    mensagens ficam persistidas no mesmo banco do restante do aplicativo.
-    """
+    """Mensagens privadas vinculadas a uma única partida ativa."""
     id = db.Column(db.Integer, primary_key=True)
     game_id = db.Column(db.Integer, nullable=False, index=True)
     user_id = db.Column(db.Integer, nullable=False, index=True)
@@ -595,9 +591,29 @@ class GameChatMessage(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
 
 
+def delete_game_records(game: GameSession, commit: bool = True) -> None:
+    """Remove partida, jogadas e chat para não acumular histórico encerrado."""
+    game_id = int(game.id)
+    GameChatMessage.query.filter_by(game_id=game_id).delete(synchronize_session=False)
+    GameMove.query.filter_by(game_id=game_id).delete(synchronize_session=False)
+    db.session.delete(game)
+    if commit:
+        db.session.commit()
+
+
+def purge_finished_games() -> int:
+    games = GameSession.query.filter_by(status="finished").all()
+    for game in games:
+        delete_game_records(game, commit=False)
+    if games:
+        db.session.commit()
+    return len(games)
+
+
 with app.app_context():
     ensure_default_fofoca_models()
     db.create_all()
+    purge_finished_games()
 
     # Segredo de sessão persistente no PostgreSQL, evitando logout em redeploy.
     secret_setting = db.session.get(AppSetting, "session_secret")
@@ -1384,6 +1400,9 @@ def serialize_game(game: GameSession, user: User, include_state=False) -> dict:
         "status": game.status,
         "turn_user_id": game.turn_user_id,
         "is_my_turn": game.status == "active" and game.turn_user_id == user.id,
+        "is_creator": game.created_by_id == user.id,
+        "pending_for_me": game.status == "pending" and game.created_by_id != user.id,
+        "invite_url": public_game_invite_url(game.code) if game.status == "pending" else None,
         "winner_user_id": game.winner_user_id,
         "winner_name": winner.full_name if winner else None,
         "opponent_id": opponent.id if opponent else None,
@@ -1497,6 +1516,13 @@ def public_login_url() -> str:
     if base:
         return f"{base}/login"
     return url_for("login", _external=True)
+
+
+def public_game_invite_url(code: str) -> str:
+    base = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if base:
+        return f"{base}/game-invite/{code}"
+    return url_for("game_invite_page", code=code, _external=True)
 
 
 def send_account_created_whatsapp(user: User) -> tuple[bool, str]:
@@ -2737,8 +2763,37 @@ def game_page(code):
     game = game_for_user(code, user)
     if not game:
         return render_template("not_found.html", message="Partida não encontrada ou privada."), 404
+    if game.status == "pending":
+        return redirect(url_for("game_invite_page", code=game.code))
     touch_presence(user)
     return render_template("game.html", user=user, game=game, game_info=game_type_info(game.game_type), user_photo_url=user_photo_url(user))
+
+
+@app.get("/game-invite/<code>")
+@login_required
+def game_invite_page(code):
+    user = current_user()
+    game = game_for_user(code, user)
+    if not game:
+        return render_template("not_found.html", message="Convite não encontrado, recusado ou encerrado."), 404
+    if game.status == "active":
+        return redirect(url_for("game_page", code=code))
+    if game.status != "pending":
+        return redirect(url_for("games_page"))
+    opponent = game_opponent(game, user.id)
+    creator = db.session.get(User, game.created_by_id)
+    touch_presence(user)
+    return render_template(
+        "game_invite.html",
+        user=user,
+        game=game,
+        game_info=game_type_info(game.game_type),
+        opponent=opponent,
+        creator=creator,
+        is_creator=game.created_by_id == user.id,
+        invite_url=public_game_invite_url(code),
+        user_photo_url=user_photo_url(user),
+    )
 
 
 @app.get("/api/games")
@@ -2746,7 +2801,18 @@ def game_page(code):
 def api_games_list():
     user = current_user()
     touch_presence(user)
+    # Remove qualquer partida encerrada remanescente de versões anteriores.
+    old_finished = GameSession.query.filter(
+        GameSession.status == "finished",
+        (GameSession.player_a_id == user.id) | (GameSession.player_b_id == user.id),
+    ).all()
+    for old_game in old_finished:
+        delete_game_records(old_game, commit=False)
+    if old_finished:
+        db.session.commit()
+
     games = GameSession.query.filter(
+        GameSession.status.in_(["pending", "active"]),
         (GameSession.player_a_id == user.id) | (GameSession.player_b_id == user.id)
     ).order_by(GameSession.updated_at.desc()).limit(100).all()
     opponents = User.query.filter(User.id != user.id, User.active.is_(True)).order_by(User.full_name.asc()).all()
@@ -2783,22 +2849,104 @@ def api_games_create():
         player_a_id=user.id,
         player_b_id=opponent.id,
         created_by_id=user.id,
-        status="active",
-        turn_user_id=user.id,
+        status="pending",
+        turn_user_id=None,
         state_json=json.dumps(state, ensure_ascii=False, separators=(",", ":")),
         updated_at=utcnow(),
     )
     db.session.add(game)
     db.session.commit()
     info = game_type_info(game_type)
+    invite_path = url_for("game_invite_page", code=code)
+    invite_url = public_game_invite_url(code)
     send_user_push(
         opponent.id,
-        f"{info['icon']} Nova partida • Nossa Sala",
-        f"{user.full_name} iniciou {info['name']} com você. A primeira jogada está aguardando.",
-        url_for("game_page", code=code),
-        f"game-{code}",
+        f"{info['icon']} Convite para jogar • Nossa Sala",
+        f"{user.full_name} convidou você para {info['name']}. Aceite ou recuse a partida.",
+        invite_path,
+        f"game-invite-{code}",
     )
-    return jsonify({"status":"ok", "game": serialize_game(game, user), "url": url_for("game_page", code=code)})
+    return jsonify({"status":"ok", "game": serialize_game(game, user), "invite_url": invite_url, "url": invite_path})
+
+
+@app.post("/api/games/<code>/accept")
+@login_required
+def api_game_accept(code):
+    user = current_user()
+    game = game_for_user(code, user)
+    if not game:
+        return jsonify({"error": "Convite não encontrado."}), 404
+    if game.status != "pending":
+        return jsonify({"error": "Esse convite não está mais pendente."}), 409
+    if game.created_by_id == user.id:
+        return jsonify({"error": "A outra pessoa precisa aceitar o convite."}), 403
+
+    creator = db.session.get(User, game.created_by_id)
+    game.status = "active"
+    state = parse_game_state(game)
+    first_turn = int(state.get("turn") or game.created_by_id)
+    game.turn_user_id = first_turn
+    game.updated_at = utcnow()
+    db.session.commit()
+    if creator:
+        info = game_type_info(game.game_type)
+        send_user_push(
+            creator.id,
+            f"{info['icon']} Convite aceito • Nossa Sala",
+            f"{user.full_name} aceitou jogar {info['name']} com você.",
+            url_for("game_page", code=game.code),
+            f"game-{game.code}",
+        )
+    return jsonify({"status": "ok", "url": url_for("game_page", code=game.code)})
+
+
+@app.post("/api/games/<code>/refuse")
+@login_required
+def api_game_refuse(code):
+    user = current_user()
+    game = game_for_user(code, user)
+    if not game:
+        return jsonify({"error": "Convite não encontrado."}), 404
+    if game.status != "pending":
+        return jsonify({"error": "Esse convite não está mais pendente."}), 409
+    if game.created_by_id == user.id:
+        return jsonify({"error": "Somente a pessoa convidada pode recusar."}), 403
+
+    creator = db.session.get(User, game.created_by_id)
+    info = game_type_info(game.game_type)
+    delete_game_records(game)
+    if creator:
+        send_user_push(
+            creator.id,
+            f"{info['icon']} Convite recusado • Nossa Sala",
+            f"{user.full_name} recusou o convite para {info['name']}.",
+            url_for("games_page"),
+            f"game-invite-refused-{code}",
+        )
+    return jsonify({"status": "ok", "url": url_for("games_page")})
+
+
+@app.post("/api/games/<code>/cancel-invite")
+@login_required
+def api_game_cancel_invite(code):
+    user = current_user()
+    game = game_for_user(code, user)
+    if not game:
+        return jsonify({"error": "Convite não encontrado."}), 404
+    if game.status != "pending" or game.created_by_id != user.id:
+        return jsonify({"error": "Você não pode cancelar esse convite."}), 403
+    opponent = game_opponent(game, user.id)
+    info = game_type_info(game.game_type)
+    delete_game_records(game)
+    if opponent:
+        send_user_push(
+            opponent.id,
+            f"{info['icon']} Convite cancelado • Nossa Sala",
+            f"{user.full_name} cancelou o convite para {info['name']}.",
+            url_for("games_page"),
+            f"game-invite-cancel-{code}",
+        )
+    return jsonify({"status": "ok", "url": url_for("games_page")})
 
 
 @app.get("/api/games/<code>")
@@ -2808,6 +2956,8 @@ def api_game_state(code):
     game = game_for_user(code, user)
     if not game:
         return jsonify({"error": "Partida não encontrada."}), 404
+    if game.status == "pending":
+        return jsonify({"error": "A partida ainda aguarda aceitação.", "invite_url": url_for("game_invite_page", code=code)}), 409
     touch_presence(user)
     return jsonify(serialize_game(game, user, include_state=True))
 
@@ -2849,19 +2999,24 @@ def api_game_move(code):
         ))
         db.session.commit()
 
-    # Push sempre para a outra pessoa quando a jogada for concluída. Se ainda for
-    # a vez do mesmo jogador (captura múltipla), apenas o estado persistido muda.
+    # Push sempre para a outra pessoa quando a jogada for concluída. Se a partida
+    # terminou, devolve o resultado desta jogada e remove imediatamente o histórico
+    # persistente da partida (jogadas + chat + sessão).
     opponent = game_opponent(game, user.id)
-    if opponent:
-        if game.status == "finished" or game.turn_user_id == opponent.id:
-            send_user_push(
-                opponent.id,
-                f"🎮 {game_type_info(game.game_type)['name']} • Nossa Sala",
-                game_move_summary_for_push(game, user),
-                url_for("game_page", code=game.code),
-                f"game-{game.code}",
-            )
-    return jsonify({"status":"ok", "game": serialize_game(game, user, include_state=True)})
+    final_payload = serialize_game(game, user, include_state=True)
+    finished = game.status == "finished"
+    if opponent and (finished or game.turn_user_id == opponent.id):
+        send_user_push(
+            opponent.id,
+            f"🎮 {game_type_info(game.game_type)['name']} • Nossa Sala",
+            game_move_summary_for_push(game, user),
+            url_for("games_page") if finished else url_for("game_page", code=game.code),
+            f"game-{game.code}",
+        )
+    if finished:
+        delete_game_records(game)
+        return jsonify({"status":"ok", "game": final_payload, "removed": True, "redirect_url": url_for("games_page")})
+    return jsonify({"status":"ok", "game": final_payload})
 
 
 @app.get("/api/games/<code>/chat")
@@ -2947,9 +3102,11 @@ def api_game_resign(code):
     game.last_move_at = utcnow()
     db.session.add(GameMove(game_id=game.id, player_id=user.id, move_json='{"resign":true}', summary="desistiu da partida"))
     db.session.commit()
+    final_payload = serialize_game(game, user, include_state=True)
     if opponent:
-        send_user_push(opponent.id, "🎮 Partida encerrada • Nossa Sala", f"{user.full_name} desistiu de {game_type_info(game.game_type)['name']}. Você venceu.", url_for("game_page", code=game.code), f"game-{game.code}")
-    return jsonify({"status":"ok", "game": serialize_game(game, user, include_state=True)})
+        send_user_push(opponent.id, "🎮 Partida encerrada • Nossa Sala", f"{user.full_name} desistiu de {game_type_info(game.game_type)['name']}. Você venceu.", url_for("games_page"), f"game-{game.code}")
+    delete_game_records(game)
+    return jsonify({"status":"ok", "game": final_payload, "removed": True, "redirect_url": url_for("games_page")})
 
 
 @app.post("/api/games/<code>/rematch")

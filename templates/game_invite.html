@@ -1,0 +1,19 @@
+<!doctype html><html lang="pt-BR"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#182224"><title>Convite para jogar • Nossa Sala</title>
+<link rel="manifest" href="/manifest.webmanifest"><link rel="icon" href="/static/icons/icon-192.png"><link rel="apple-touch-icon" href="/static/icons/icon-192.png"><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head>
+<body><main class="app-shell">
+<header class="app-header"><div class="header-profile"><a class="back-mini" href="{{ url_for('games_page') }}">‹</a><div class="game-header-icon">{{ game_info.icon }}</div><div><strong>Convite de {{ game_info.name }}</strong><div class="room-code">Partida privada • {{ game.code }}</div></div></div><div class="header-actions"><a class="secondary compact link-button" href="{{ url_for('games_page') }}">Jogos</a></div></header>
+<div id="statusBar" class="status-bar hidden" role="status"></div>
+<section class="invite-game-page"><section class="panel-section game-invite-card">
+<div class="game-invite-hero"><div class="game-invite-icon">{{ game_info.icon }}</div><div><h2>{{ game_info.name }}</h2>{% if is_creator %}<p>Você convidou <strong>{{ opponent.full_name if opponent else 'o outro jogador' }}</strong>. A partida começará somente quando a pessoa aceitar.</p>{% else %}<p><strong>{{ creator.full_name if creator else 'Um jogador' }}</strong> convidou você para uma partida privada.</p>{% endif %}</div></div>
+{% if is_creator %}
+<div class="invite-link-box"><label>Link privado do convite</label><div class="invite-link-row"><input id="inviteLink" type="text" readonly value="{{ invite_url }}"><button id="copyInviteBtn" class="primary" type="button">Copiar link</button></div><div class="invite-share-actions"><button id="shareInviteBtn" class="secondary" type="button">Compartilhar</button><button id="cancelInviteBtn" class="danger-btn" type="button">Cancelar convite</button></div></div>
+<div class="game-invite-waiting"><span class="waiting-dot"></span><strong>Aguardando resposta</strong><small>A outra pessoa pode aceitar quando quiser. Ela não precisa estar online agora.</small></div>
+{% else %}
+<div class="game-invite-decision"><button id="acceptInviteBtn" class="primary" type="button">✓ Aceitar partida</button><button id="refuseInviteBtn" class="danger-btn" type="button">✕ Recusar</button></div>
+<p class="small centered-note">Ao aceitar, a partida será criada para vocês dois e ficará salva por turnos.</p>
+{% endif %}
+</section></section>
+</main>
+<script>window.GAME_INVITE={{ {'code': game.code, 'is_creator': is_creator, 'invite_url': invite_url}|tojson }};</script>
+<script src="/static/common.js"></script><script src="/static/game_invite.js"></script></body></html>

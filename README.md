@@ -323,3 +323,13 @@ Os tons `#ED42A6` e `#EDD742` são usados apenas em pequenos destaques como Fofo
 ## Truco — Vira em destaque
 
 A carta **Vira** agora aparece em tamanho grande na mesa, com o valor/rank bem visível e a **Manilha** destacada logo ao lado.
+
+## Convite privado por link
+
+Ao criar uma partida, ela nasce com status `pending`. O servidor gera um link privado em `/game-invite/<code>` e envia uma notificação ao usuário convidado. O convidado pode **Aceitar** ou **Recusar**. A partida só muda para `active` após a aceitação.
+
+O criador pode copiar/compartilhar o link e cancelar o convite enquanto ele estiver pendente.
+
+## Limpeza automática de partidas encerradas
+
+Partidas finalizadas não ficam acumuladas. Quando há vitória, empate ou desistência, o servidor devolve o resultado da jogada atual, envia a notificação necessária e remove a sessão, o histórico de jogadas e o chat daquela partida. Partidas encerradas de versões antigas também são limpas automaticamente.
