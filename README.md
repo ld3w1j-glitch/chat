@@ -298,3 +298,13 @@ Jogos iniciais:
 - Quando ele voltar, o jogo é restaurado no ponto exato onde parou.
 - Web Push avisa o outro participante quando uma jogada passa a vez para ele.
 - No Truco, as cartas da mão adversária ficam somente no servidor e não são enviadas ao navegador do outro jogador.
+
+
+## Chat privado por partida
+
+Cada partida agora possui um chat próprio. As mensagens:
+- ficam vinculadas somente àquela partida;
+- são visíveis somente para os dois jogadores;
+- permanecem salvas mesmo quando o outro jogador está offline;
+- aparecem ao vivo por polling quando os dois estão conectados;
+- disparam Web Push para o adversário quando as notificações estão ativadas.

@@ -582,6 +582,19 @@ class GameMove(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
 
 
+class GameChatMessage(db.Model):
+    """Mensagens privadas vinculadas a uma única partida.
+
+    O chat continua disponível mesmo depois de a partida terminar e todas as
+    mensagens ficam persistidas no mesmo banco do restante do aplicativo.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    game_id = db.Column(db.Integer, nullable=False, index=True)
+    user_id = db.Column(db.Integer, nullable=False, index=True)
+    text = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+
+
 with app.app_context():
     ensure_default_fofoca_models()
     db.create_all()
@@ -970,6 +983,24 @@ def game_for_user(code: str, user: User) -> GameSession | None:
 def game_opponent(game: GameSession, user_id: int) -> User | None:
     other_id = game.player_b_id if user_id == game.player_a_id else game.player_a_id
     return db.session.get(User, other_id)
+
+
+def serialize_game_chat_message(message: GameChatMessage, viewer: User) -> dict:
+    author = db.session.get(User, message.user_id)
+    created = message.created_at
+    if created and created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    return {
+        "id": message.id,
+        "game_id": message.game_id,
+        "user_id": message.user_id,
+        "mine": message.user_id == viewer.id,
+        "author_name": author.full_name if author else "Usuário",
+        "author_username": author.username if author else "",
+        "author_photo_url": user_photo_url(author) if author else None,
+        "text": message.text,
+        "created_at": created.isoformat() if created else None,
+    }
 
 
 def game_type_info(game_type: str) -> dict:
@@ -2831,6 +2862,68 @@ def api_game_move(code):
                 f"game-{game.code}",
             )
     return jsonify({"status":"ok", "game": serialize_game(game, user, include_state=True)})
+
+
+@app.get("/api/games/<code>/chat")
+@login_required
+def api_game_chat_list(code):
+    user = current_user()
+    game = game_for_user(code, user)
+    if not game:
+        return jsonify({"error": "Partida não encontrada."}), 404
+    try:
+        after_id = max(0, int(request.args.get("after", 0)))
+    except (TypeError, ValueError):
+        after_id = 0
+
+    query = GameChatMessage.query.filter_by(game_id=game.id)
+    if after_id > 0:
+        messages = query.filter(GameChatMessage.id > after_id).order_by(GameChatMessage.id.asc()).limit(100).all()
+    else:
+        # Primeira abertura: busca as últimas 100 e devolve em ordem cronológica.
+        messages = query.order_by(GameChatMessage.id.desc()).limit(100).all()
+        messages.reverse()
+    touch_presence(user)
+    return jsonify({
+        "messages": [serialize_game_chat_message(message, user) for message in messages],
+        "last_id": messages[-1].id if messages else after_id,
+    })
+
+
+@app.post("/api/games/<code>/chat")
+@login_required
+def api_game_chat_send(code):
+    user = current_user()
+    game = game_for_user(code, user)
+    if not game:
+        return jsonify({"error": "Partida não encontrada."}), 404
+    data = request.get_json(silent=True) or {}
+    text_value = str(data.get("text") or "").strip()
+    if not text_value:
+        return jsonify({"error": "Digite uma mensagem."}), 400
+    if len(text_value) > 1200:
+        return jsonify({"error": "A mensagem pode ter no máximo 1200 caracteres."}), 400
+
+    message = GameChatMessage(game_id=game.id, user_id=user.id, text=text_value)
+    db.session.add(message)
+    db.session.commit()
+    touch_presence(user)
+
+    opponent = game_opponent(game, user.id)
+    if opponent and opponent.active:
+        info = game_type_info(game.game_type)
+        preview = " ".join(text_value.split())
+        if len(preview) > 110:
+            preview = preview[:107] + "..."
+        send_user_push(
+            opponent.id,
+            f"💬 {info['name']} • Nossa Sala",
+            f"{user.full_name}: {preview}",
+            url_for("game_page", code=game.code) + "#game-chat",
+            f"game-chat-{game.code}",
+        )
+
+    return jsonify({"status": "ok", "message": serialize_game_chat_message(message, user)})
 
 
 @app.post("/api/games/<code>/resign")
