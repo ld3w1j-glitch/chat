@@ -14,6 +14,7 @@ import threading
 from collections import defaultdict
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from functools import wraps
 
 from flask import (
@@ -63,8 +64,42 @@ ALLOWED_DOCUMENT_MIMES = {
 }
 
 
+APP_TIMEZONE_NAME = os.getenv("APP_TIMEZONE", "America/Sao_Paulo").strip() or "America/Sao_Paulo"
+try:
+    APP_TIMEZONE = ZoneInfo(APP_TIMEZONE_NAME)
+except Exception:
+    # Fallback seguro para Brasília/Pouso Alegre caso a base tzdata do sistema não esteja disponível.
+    APP_TIMEZONE = timezone(timedelta(hours=-3))
+
+
 def utcnow():
     return datetime.now(timezone.utc)
+
+
+def as_utc_aware(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def as_local_time(value: datetime | None) -> datetime | None:
+    aware = as_utc_aware(value)
+    return aware.astimezone(APP_TIMEZONE) if aware else None
+
+
+def utc_iso(value: datetime | None) -> str | None:
+    aware = as_utc_aware(value)
+    if not aware:
+        return None
+    # Z deixa explícito para o navegador que o valor recebido está em UTC.
+    return aware.isoformat().replace("+00:00", "Z")
+
+
+def local_datetime_filter(value, fmt="%d/%m/%Y %H:%M"):
+    local = as_local_time(value)
+    return local.strftime(fmt) if local else ""
 
 
 def running_on_railway() -> bool:
@@ -125,6 +160,7 @@ def normalize_phone(value: str) -> str:
 
 
 app = Flask(__name__)
+app.add_template_filter(local_datetime_filter, "local_datetime")
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 app.config.update(
     SQLALCHEMY_DATABASE_URI=get_database_url(),
@@ -869,14 +905,13 @@ def reply_data_for(message: Message) -> dict | None:
 
 def serialize_message(message: Message) -> dict:
     state = message_effective_state(message)
-    created_at = message.created_at
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
+    created_at = as_utc_aware(message.created_at)
+    local_created_at = as_local_time(message.created_at)
     data = {
         "id": message.id,
         "author": message.author,
-        "time": message.created_at.strftime("%H:%M"),
-        "created_ms": int(created_at.timestamp() * 1000),
+        "time": local_created_at.strftime("%H:%M") if local_created_at else "",
+        "created_ms": int(created_at.timestamp() * 1000) if created_at else 0,
         "reply": reply_data_for(message),
         "edited": state["edited"],
         "deleted": state["deleted"],
@@ -1003,9 +1038,7 @@ def game_opponent(game: GameSession, user_id: int) -> User | None:
 
 def serialize_game_chat_message(message: GameChatMessage, viewer: User) -> dict:
     author = db.session.get(User, message.user_id)
-    created = message.created_at
-    if created and created.tzinfo is None:
-        created = created.replace(tzinfo=timezone.utc)
+    created = as_utc_aware(message.created_at)
     return {
         "id": message.id,
         "game_id": message.game_id,
@@ -1015,7 +1048,7 @@ def serialize_game_chat_message(message: GameChatMessage, viewer: User) -> dict:
         "author_username": author.username if author else "",
         "author_photo_url": user_photo_url(author) if author else None,
         "text": message.text,
-        "created_at": created.isoformat() if created else None,
+        "created_at": utc_iso(created),
     }
 
 
@@ -1408,8 +1441,8 @@ def serialize_game(game: GameSession, user: User, include_state=False) -> dict:
         "opponent_id": opponent.id if opponent else None,
         "opponent_name": opponent.full_name if opponent else "Jogador",
         "opponent_photo_url": user_photo_url(opponent) if opponent else None,
-        "updated_at": game.updated_at.isoformat() if game.updated_at else None,
-        "last_move_at": game.last_move_at.isoformat() if game.last_move_at else None,
+        "updated_at": utc_iso(game.updated_at),
+        "last_move_at": utc_iso(game.last_move_at),
         "url": url_for("game_page", code=game.code),
     }
     if include_state:
@@ -1421,7 +1454,7 @@ def serialize_game(game: GameSession, user: User, include_state=False) -> dict:
                 "player_id": move.player_id,
                 "player_name": (db.session.get(User, move.player_id).full_name if db.session.get(User, move.player_id) else "Jogador"),
                 "summary": move.summary,
-                "created_at": move.created_at.isoformat(),
+                "created_at": utc_iso(move.created_at),
             } for move in reversed(moves)
         ]
     return data

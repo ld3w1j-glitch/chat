@@ -333,3 +333,8 @@ O criador pode copiar/compartilhar o link e cancelar o convite enquanto ele esti
 ## Limpeza automática de partidas encerradas
 
 Partidas finalizadas não ficam acumuladas. Quando há vitória, empate ou desistência, o servidor devolve o resultado da jogada atual, envia a notificação necessária e remove a sessão, o histórico de jogadas e o chat daquela partida. Partidas encerradas de versões antigas também são limpas automaticamente.
+
+
+## Correção de horário
+
+A aplicação continua salvando datas em UTC no banco, mas agora converte a exibição para `America/Sao_Paulo` (UTC-3), configurável por `APP_TIMEZONE`. Valores enviados ao JavaScript usam `Z` explícito para evitar o navegador interpretar UTC como horário local. A correção vale para mensagens, chat de jogos, histórico de jogadas, partidas e painel admin.
