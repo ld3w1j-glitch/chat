@@ -280,3 +280,21 @@ A versão reforça o Web Push:
 - `/api/push/test` envia um push de diagnóstico para o próprio usuário.
 
 Cada aparelho precisa conceder permissão para notificações pelo menos uma vez. No iPhone/iPad, o PWA precisa ser adicionado à Tela de Início e aberto pelo ícone para Web Push.
+
+## Modo Jogos privados por turnos
+
+O sistema agora possui uma área **🎮 Jogos** para partidas privadas e assíncronas entre dois usuários.
+
+Jogos iniciais:
+- **Jogo da Velha**: regras completas, vitória/empate e revanche.
+- **Damas 8×8**: movimentos diagonais, captura obrigatória, captura múltipla e coroação. As damas coroadas usam movimento curto diagonal em ambas as direções.
+- **Truco Paulista (modo básico)**: baralho de 40 cartas, vira, manilha por naipe, três cartas por mão e placar até 12. O pedido de Truco/aumento de aposta não faz parte desta primeira versão.
+
+### Persistência e privacidade
+- Cada partida é vinculada exclusivamente aos dois jogadores.
+- Apenas os participantes conseguem abrir a URL/API da partida.
+- Estado, turno, placar e histórico de jogadas ficam no mesmo banco persistente usado pelo sistema.
+- O outro jogador não precisa estar online quando a jogada é feita.
+- Quando ele voltar, o jogo é restaurado no ponto exato onde parou.
+- Web Push avisa o outro participante quando uma jogada passa a vez para ele.
+- No Truco, as cartas da mão adversária ficam somente no servidor e não são enviadas ao navegador do outro jogador.

@@ -1,5 +1,5 @@
-const CACHE = "nossa-sala-v8-profile-push";
-const CORE = ["/", "/manifest.webmanifest", "/static/style.css", "/static/common.js", "/static/chat.js", "/static/icons/icon-192.png", "/static/icons/icon-512.png"];
+const CACHE = "nossa-sala-v9-async-games";
+const CORE = ["/", "/manifest.webmanifest", "/static/style.css", "/static/common.js", "/static/chat.js", "/static/games.js", "/static/game.js", "/static/icons/icon-192.png", "/static/icons/icon-512.png"];
 
 self.addEventListener("install", event => {
   event.waitUntil(

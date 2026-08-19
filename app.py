@@ -10,6 +10,8 @@ import re
 import secrets
 import urllib.error
 import urllib.request
+import threading
+from collections import defaultdict
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from functools import wraps
@@ -552,6 +554,34 @@ class TypingState(db.Model):
     last_typing_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
 
 
+class GameSession(db.Model):
+    __table_args__ = (
+        db.Index("ix_game_players", "player_a_id", "player_b_id"),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(24), unique=True, nullable=False, index=True)
+    game_type = db.Column(db.String(30), nullable=False, index=True)
+    player_a_id = db.Column(db.Integer, nullable=False, index=True)
+    player_b_id = db.Column(db.Integer, nullable=False, index=True)
+    created_by_id = db.Column(db.Integer, nullable=False, index=True)
+    status = db.Column(db.String(20), nullable=False, default="active", index=True)
+    turn_user_id = db.Column(db.Integer, nullable=True, index=True)
+    winner_user_id = db.Column(db.Integer, nullable=True, index=True)
+    state_json = db.Column(db.Text, nullable=False, default="{}")
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+    last_move_at = db.Column(db.DateTime(timezone=True), nullable=True)
+
+
+class GameMove(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    game_id = db.Column(db.Integer, nullable=False, index=True)
+    player_id = db.Column(db.Integer, nullable=False, index=True)
+    move_json = db.Column(db.Text, nullable=False, default="{}")
+    summary = db.Column(db.String(240), nullable=False, default="")
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
+
+
 with app.app_context():
     ensure_default_fofoca_models()
     db.create_all()
@@ -916,6 +946,445 @@ def user_photo_url(user: User | None) -> str | None:
             dt = dt.replace(tzinfo=timezone.utc)
         version = int(dt.timestamp())
     return url_for("profile_photo", user_id=user.id, v=version)
+
+
+
+GAME_TYPES = {
+    "tictactoe": {"name": "Jogo da Velha", "icon": "⭕"},
+    "checkers": {"name": "Damas", "icon": "⚫"},
+    "truco": {"name": "Truco Paulista", "icon": "🃏"},
+}
+GAME_LOCKS = defaultdict(threading.Lock)
+TRUCO_RANKS = ["4", "5", "6", "7", "Q", "J", "K", "A", "2", "3"]
+TRUCO_SUITS = ["♦", "♠", "♥", "♣"]
+TRUCO_SUIT_POWER = {"♦": 0, "♠": 1, "♥": 2, "♣": 3}
+
+
+def game_for_user(code: str, user: User) -> GameSession | None:
+    game = GameSession.query.filter_by(code=code).first()
+    if not game or user.id not in (game.player_a_id, game.player_b_id):
+        return None
+    return game
+
+
+def game_opponent(game: GameSession, user_id: int) -> User | None:
+    other_id = game.player_b_id if user_id == game.player_a_id else game.player_a_id
+    return db.session.get(User, other_id)
+
+
+def game_type_info(game_type: str) -> dict:
+    return GAME_TYPES.get(game_type, {"name": game_type, "icon": "🎮"})
+
+
+def new_game_code() -> str:
+    while True:
+        code = "G" + secrets.token_urlsafe(9).replace("-", "").replace("_", "")[:13].upper()
+        if not GameSession.query.filter_by(code=code).first():
+            return code
+
+
+def initial_tictactoe_state(player_a: int, player_b: int) -> dict:
+    return {
+        "board": [None] * 9,
+        "marks": {str(player_a): "X", str(player_b): "O"},
+        "turn": player_a,
+        "winner": None,
+        "draw": False,
+        "moves": 0,
+    }
+
+
+def initial_checkers_state(player_a: int, player_b: int) -> dict:
+    board = [[None for _ in range(8)] for _ in range(8)]
+    for r in range(3):
+        for c in range(8):
+            if (r + c) % 2 == 1:
+                board[r][c] = "a"
+    for r in range(5, 8):
+        for c in range(8):
+            if (r + c) % 2 == 1:
+                board[r][c] = "b"
+    return {
+        "board": board,
+        "side_by_user": {str(player_a): "a", str(player_b): "b"},
+        "turn": player_a,
+        "winner": None,
+        "forced_from": None,
+        "move_no": 0,
+    }
+
+
+def truco_deck() -> list[dict]:
+    return [
+        {"id": f"{rank}{suit}", "rank": rank, "suit": suit}
+        for rank in TRUCO_RANKS for suit in TRUCO_SUITS
+    ]
+
+
+def deal_truco_hand(player_a: int, player_b: int, score=None, hand_no=1, starter=None, last_hand_result=None) -> dict:
+    deck = truco_deck()
+    secrets.SystemRandom().shuffle(deck)
+    starter = starter or player_a
+    vira = deck[6]
+    manilha_rank = TRUCO_RANKS[(TRUCO_RANKS.index(vira["rank"]) + 1) % len(TRUCO_RANKS)]
+    return {
+        "score": score or {str(player_a): 0, str(player_b): 0},
+        "hand_no": hand_no,
+        "hands": {str(player_a): deck[:3], str(player_b): deck[3:6]},
+        "vira": vira,
+        "manilha_rank": manilha_rank,
+        "turn": starter,
+        "starter": starter,
+        "played": [],
+        "tricks": [],
+        "winner": None,
+        "last_hand_result": last_hand_result,
+        "mode": "basic",
+    }
+
+
+def initial_game_state(game_type: str, player_a: int, player_b: int) -> dict:
+    if game_type == "tictactoe":
+        return initial_tictactoe_state(player_a, player_b)
+    if game_type == "checkers":
+        return initial_checkers_state(player_a, player_b)
+    if game_type == "truco":
+        return deal_truco_hand(player_a, player_b)
+    raise ValueError("Jogo inválido.")
+
+
+def parse_game_state(game: GameSession) -> dict:
+    try:
+        data = json.loads(game.state_json or "{}")
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_game_state(game: GameSession, state: dict):
+    game.state_json = json.dumps(state, ensure_ascii=False, separators=(",", ":"))
+    game.updated_at = utcnow()
+    game.turn_user_id = int(state.get("turn")) if state.get("turn") is not None and game.status == "active" else None
+
+
+def tictactoe_winner(board: list) -> str | None:
+    lines = [(0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6)]
+    for a,b,c in lines:
+        if board[a] and board[a] == board[b] == board[c]:
+            return board[a]
+    return None
+
+
+def apply_tictactoe_move(game: GameSession, state: dict, user: User, payload: dict) -> str:
+    if int(state.get("turn") or 0) != user.id:
+        raise ValueError("Agora é a vez da outra pessoa.")
+    try:
+        index = int(payload.get("index"))
+    except Exception:
+        raise ValueError("Casa inválida.")
+    if index < 0 or index > 8:
+        raise ValueError("Casa inválida.")
+    board = state.get("board") or [None] * 9
+    if board[index] is not None:
+        raise ValueError("Essa casa já está ocupada.")
+    mark = state["marks"][str(user.id)]
+    board[index] = mark
+    state["board"] = board
+    state["moves"] = int(state.get("moves") or 0) + 1
+    winner_mark = tictactoe_winner(board)
+    if winner_mark:
+        winner_id = next(int(uid) for uid, value in state["marks"].items() if value == winner_mark)
+        state["winner"] = winner_id
+        state["turn"] = None
+        game.status = "finished"
+        game.winner_user_id = winner_id
+        return f"jogou {mark} e venceu a partida"
+    if all(cell is not None for cell in board):
+        state["draw"] = True
+        state["turn"] = None
+        game.status = "finished"
+        return f"jogou {mark}; a partida terminou empatada"
+    other = game.player_b_id if user.id == game.player_a_id else game.player_a_id
+    state["turn"] = other
+    return f"jogou {mark} na casa {index + 1}"
+
+
+def checkers_side_for_user(state: dict, user_id: int) -> str:
+    return (state.get("side_by_user") or {}).get(str(user_id), "")
+
+
+def checkers_piece_owner(piece: str | None) -> str:
+    return piece.lower() if piece else ""
+
+
+def checkers_dirs(piece: str) -> list[int]:
+    if piece.isupper():
+        return [-1, 1]
+    return [1] if piece == "a" else [-1]
+
+
+def checkers_capture_moves(board: list, r: int, c: int) -> list[tuple[int,int]]:
+    piece = board[r][c]
+    if not piece:
+        return []
+    side = piece.lower()
+    result = []
+    for dr in checkers_dirs(piece):
+        for dc in (-1, 1):
+            mr, mc = r + dr, c + dc
+            tr, tc = r + 2*dr, c + 2*dc
+            if 0 <= tr < 8 and 0 <= tc < 8 and 0 <= mr < 8 and 0 <= mc < 8:
+                middle = board[mr][mc]
+                if middle and middle.lower() != side and board[tr][tc] is None:
+                    result.append((tr, tc))
+    return result
+
+
+def checkers_normal_moves(board: list, r: int, c: int) -> list[tuple[int,int]]:
+    piece = board[r][c]
+    if not piece:
+        return []
+    result=[]
+    for dr in checkers_dirs(piece):
+        for dc in (-1,1):
+            tr, tc = r+dr, c+dc
+            if 0 <= tr < 8 and 0 <= tc < 8 and board[tr][tc] is None:
+                result.append((tr,tc))
+    return result
+
+
+def checkers_all_moves(board: list, side: str) -> tuple[bool, dict]:
+    captures = {}
+    normals = {}
+    for r in range(8):
+        for c in range(8):
+            piece = board[r][c]
+            if piece and piece.lower() == side:
+                caps = checkers_capture_moves(board,r,c)
+                if caps:
+                    captures[(r,c)] = caps
+                moves = checkers_normal_moves(board,r,c)
+                if moves:
+                    normals[(r,c)] = moves
+    return bool(captures), captures if captures else normals
+
+
+def apply_checkers_move(game: GameSession, state: dict, user: User, payload: dict) -> str:
+    if int(state.get("turn") or 0) != user.id:
+        raise ValueError("Agora é a vez da outra pessoa.")
+    try:
+        fr = payload.get("from")
+        to = payload.get("to")
+        r1,c1 = int(fr[0]), int(fr[1])
+        r2,c2 = int(to[0]), int(to[1])
+    except Exception:
+        raise ValueError("Jogada inválida.")
+    if not all(0 <= v < 8 for v in (r1,c1,r2,c2)):
+        raise ValueError("Jogada fora do tabuleiro.")
+    board = state.get("board")
+    side = checkers_side_for_user(state, user.id)
+    piece = board[r1][c1]
+    if not piece or piece.lower() != side:
+        raise ValueError("Escolha uma peça sua.")
+    forced = state.get("forced_from")
+    if forced and [r1,c1] != [int(forced[0]), int(forced[1])]:
+        raise ValueError("Você precisa continuar a captura com a mesma peça.")
+    has_capture, legal_map = checkers_all_moves(board, side)
+    legal = legal_map.get((r1,c1), [])
+    if (r2,c2) not in legal:
+        if has_capture:
+            raise ValueError("Existe uma captura obrigatória.")
+        raise ValueError("Esse movimento não é permitido.")
+    capture = abs(r2-r1) == 2
+    board[r2][c2] = piece
+    board[r1][c1] = None
+    captured = None
+    if capture:
+        mr, mc = (r1+r2)//2, (c1+c2)//2
+        captured = board[mr][mc]
+        board[mr][mc] = None
+    if piece == "a" and r2 == 7:
+        board[r2][c2] = "A"
+    elif piece == "b" and r2 == 0:
+        board[r2][c2] = "B"
+    state["board"] = board
+    state["move_no"] = int(state.get("move_no") or 0) + 1
+    if capture and checkers_capture_moves(board,r2,c2):
+        state["forced_from"] = [r2,c2]
+        state["turn"] = user.id
+        return f"capturou uma peça e precisa continuar a sequência"
+    state["forced_from"] = None
+    other = game.player_b_id if user.id == game.player_a_id else game.player_a_id
+    other_side = checkers_side_for_user(state, other)
+    opponent_pieces = sum(1 for row in board for cell in row if cell and cell.lower() == other_side)
+    _, opponent_moves = checkers_all_moves(board, other_side)
+    if opponent_pieces == 0 or not opponent_moves:
+        state["winner"] = user.id
+        state["turn"] = None
+        game.status = "finished"
+        game.winner_user_id = user.id
+        return "fez a última jogada e venceu a partida de damas"
+    state["turn"] = other
+    return "capturou uma peça" if captured else "moveu uma peça"
+
+
+def truco_card_strength(card: dict, manilha_rank: str) -> tuple[int,int]:
+    rank = card.get("rank")
+    suit = card.get("suit")
+    if rank == manilha_rank:
+        return (100, TRUCO_SUIT_POWER.get(suit, 0))
+    return (TRUCO_RANKS.index(rank), 0)
+
+
+def truco_trick_winner(played: list, manilha_rank: str) -> int | None:
+    a,b = played[-2], played[-1]
+    sa = truco_card_strength(a["card"], manilha_rank)
+    sb = truco_card_strength(b["card"], manilha_rank)
+    if sa == sb:
+        return None
+    return int(a["user_id"] if sa > sb else b["user_id"])
+
+
+def truco_hand_winner(tricks: list) -> int | None:
+    if not tricks:
+        return None
+    winners = [t.get("winner_user_id") for t in tricks]
+    non_ties = [w for w in winners if w is not None]
+    if len(non_ties) >= 2 and non_ties[0] == non_ties[1]:
+        return int(non_ties[0])
+    if len(winners) >= 2:
+        if winners[0] is None and winners[1] is not None:
+            return int(winners[1])
+        if winners[0] is not None and winners[1] is None:
+            return int(winners[0])
+    if len(winners) >= 3:
+        if winners[2] is not None:
+            return int(winners[2])
+        if winners[0] is not None:
+            return int(winners[0])
+        if winners[1] is not None:
+            return int(winners[1])
+        return -1
+    return None
+
+
+def apply_truco_move(game: GameSession, state: dict, user: User, payload: dict) -> str:
+    if int(state.get("turn") or 0) != user.id:
+        raise ValueError("Agora é a vez da outra pessoa.")
+    card_id = str(payload.get("card_id") or "")
+    hand = (state.get("hands") or {}).get(str(user.id), [])
+    card = next((c for c in hand if c.get("id") == card_id), None)
+    if not card:
+        raise ValueError("Essa carta não está mais na sua mão.")
+    hand.remove(card)
+    state["hands"][str(user.id)] = hand
+    state.setdefault("played", []).append({"user_id": user.id, "card": card})
+    other = game.player_b_id if user.id == game.player_a_id else game.player_a_id
+    if len(state["played"]) % 2 == 1:
+        state["turn"] = other
+        return f"jogou {card['rank']}{card['suit']}"
+
+    trick_cards = state["played"][-2:]
+    winner = truco_trick_winner(trick_cards, state["manilha_rank"])
+    trick_no = len(state.get("tricks") or []) + 1
+    state.setdefault("tricks", []).append({
+        "number": trick_no,
+        "winner_user_id": winner,
+        "cards": trick_cards,
+    })
+    hand_winner = truco_hand_winner(state["tricks"])
+    if hand_winner is not None:
+        if hand_winner == -1:
+            hand_winner = int(state.get("starter") or game.player_a_id)
+        score = state.get("score") or {str(game.player_a_id):0, str(game.player_b_id):0}
+        score[str(hand_winner)] = int(score.get(str(hand_winner),0)) + 1
+        hand_winner_user = db.session.get(User, hand_winner)
+        result = f"{hand_winner_user.full_name if hand_winner_user else 'Jogador'} venceu a mão {state.get('hand_no',1)}"
+        if score[str(hand_winner)] >= 12:
+            state["score"] = score
+            state["winner"] = hand_winner
+            state["turn"] = None
+            state["last_hand_result"] = result
+            game.status = "finished"
+            game.winner_user_id = hand_winner
+            return f"jogou {card['rank']}{card['suit']}; {result} e venceu o Truco"
+        next_starter = game.player_b_id if int(state.get("starter") or game.player_a_id) == game.player_a_id else game.player_a_id
+        new_state = deal_truco_hand(
+            game.player_a_id, game.player_b_id,
+            score=score,
+            hand_no=int(state.get("hand_no") or 1)+1,
+            starter=next_starter,
+            last_hand_result=result,
+        )
+        state.clear(); state.update(new_state)
+        return f"jogou {card['rank']}{card['suit']}; {result}"
+
+    if winner is None:
+        next_leader = int(state.get("starter") or game.player_a_id) if trick_no == 1 else int(trick_cards[0]["user_id"])
+    else:
+        next_leader = winner
+    state["turn"] = next_leader
+    return f"jogou {card['rank']}{card['suit']} e fechou a rodada {trick_no}"
+
+
+def sanitize_game_state(game: GameSession, user: User) -> dict:
+    state = parse_game_state(game)
+    if game.game_type != "truco":
+        return state
+    clean = {k:v for k,v in state.items() if k != "hands"}
+    my_hand = (state.get("hands") or {}).get(str(user.id), [])
+    opponent = game_opponent(game, user.id)
+    opponent_hand = (state.get("hands") or {}).get(str(opponent.id), []) if opponent else []
+    clean["my_hand"] = my_hand
+    clean["opponent_card_count"] = len(opponent_hand)
+    return clean
+
+
+def serialize_game(game: GameSession, user: User, include_state=False) -> dict:
+    opponent = game_opponent(game, user.id)
+    info = game_type_info(game.game_type)
+    winner = db.session.get(User, game.winner_user_id) if game.winner_user_id else None
+    data = {
+        "id": game.id,
+        "code": game.code,
+        "game_type": game.game_type,
+        "game_name": info["name"],
+        "game_icon": info["icon"],
+        "status": game.status,
+        "turn_user_id": game.turn_user_id,
+        "is_my_turn": game.status == "active" and game.turn_user_id == user.id,
+        "winner_user_id": game.winner_user_id,
+        "winner_name": winner.full_name if winner else None,
+        "opponent_id": opponent.id if opponent else None,
+        "opponent_name": opponent.full_name if opponent else "Jogador",
+        "opponent_photo_url": user_photo_url(opponent) if opponent else None,
+        "updated_at": game.updated_at.isoformat() if game.updated_at else None,
+        "last_move_at": game.last_move_at.isoformat() if game.last_move_at else None,
+        "url": url_for("game_page", code=game.code),
+    }
+    if include_state:
+        data["state"] = sanitize_game_state(game, user)
+        moves = GameMove.query.filter_by(game_id=game.id).order_by(GameMove.id.desc()).limit(12).all()
+        data["recent_moves"] = [
+            {
+                "id": move.id,
+                "player_id": move.player_id,
+                "player_name": (db.session.get(User, move.player_id).full_name if db.session.get(User, move.player_id) else "Jogador"),
+                "summary": move.summary,
+                "created_at": move.created_at.isoformat(),
+            } for move in reversed(moves)
+        ]
+    return data
+
+
+def game_move_summary_for_push(game: GameSession, mover: User) -> str:
+    info = game_type_info(game.game_type)
+    if game.status == "finished":
+        if game.winner_user_id:
+            winner = db.session.get(User, game.winner_user_id)
+            return f"{info['icon']} {info['name']}: {winner.full_name if winner else 'alguém'} venceu a partida."
+        return f"{info['icon']} {info['name']}: a partida terminou."
+    return f"{info['icon']} {mover.full_name} jogou. Agora é a sua vez."
 
 
 def process_profile_photo(raw: bytes) -> tuple[bytes, str]:
@@ -2219,6 +2688,194 @@ def push_unsubscribe():
         UserPushSubscription.query.filter_by(endpoint=endpoint, user_id=current_user().id).delete()
         db.session.commit()
     return {"status": "ok"}
+
+
+
+@app.get("/games")
+@login_required
+def games_page():
+    user = current_user()
+    touch_presence(user)
+    return render_template("games.html", user=user, user_photo_url=user_photo_url(user))
+
+
+@app.get("/game/<code>")
+@login_required
+def game_page(code):
+    user = current_user()
+    game = game_for_user(code, user)
+    if not game:
+        return render_template("not_found.html", message="Partida não encontrada ou privada."), 404
+    touch_presence(user)
+    return render_template("game.html", user=user, game=game, game_info=game_type_info(game.game_type), user_photo_url=user_photo_url(user))
+
+
+@app.get("/api/games")
+@login_required
+def api_games_list():
+    user = current_user()
+    touch_presence(user)
+    games = GameSession.query.filter(
+        (GameSession.player_a_id == user.id) | (GameSession.player_b_id == user.id)
+    ).order_by(GameSession.updated_at.desc()).limit(100).all()
+    opponents = User.query.filter(User.id != user.id, User.active.is_(True)).order_by(User.full_name.asc()).all()
+    return jsonify({
+        "games": [serialize_game(game, user) for game in games],
+        "users": [
+            {"id": other.id, "full_name": other.full_name, "username": other.username, "photo_url": user_photo_url(other)}
+            for other in opponents
+        ],
+        "game_types": [{"id": key, **value} for key, value in GAME_TYPES.items()],
+    })
+
+
+@app.post("/api/games")
+@login_required
+def api_games_create():
+    user = current_user()
+    data = request.get_json(silent=True) or {}
+    game_type = str(data.get("game_type") or "").strip().lower()
+    try:
+        opponent_id = int(data.get("opponent_id"))
+    except Exception:
+        return jsonify({"error": "Escolha com quem jogar."}), 400
+    if game_type not in GAME_TYPES:
+        return jsonify({"error": "Escolha um jogo válido."}), 400
+    opponent = db.session.get(User, opponent_id)
+    if not opponent or not opponent.active or opponent.id == user.id:
+        return jsonify({"error": "Esse jogador não está disponível."}), 400
+    code = new_game_code()
+    state = initial_game_state(game_type, user.id, opponent.id)
+    game = GameSession(
+        code=code,
+        game_type=game_type,
+        player_a_id=user.id,
+        player_b_id=opponent.id,
+        created_by_id=user.id,
+        status="active",
+        turn_user_id=user.id,
+        state_json=json.dumps(state, ensure_ascii=False, separators=(",", ":")),
+        updated_at=utcnow(),
+    )
+    db.session.add(game)
+    db.session.commit()
+    info = game_type_info(game_type)
+    send_user_push(
+        opponent.id,
+        f"{info['icon']} Nova partida • Nossa Sala",
+        f"{user.full_name} iniciou {info['name']} com você. A primeira jogada está aguardando.",
+        url_for("game_page", code=code),
+        f"game-{code}",
+    )
+    return jsonify({"status":"ok", "game": serialize_game(game, user), "url": url_for("game_page", code=code)})
+
+
+@app.get("/api/games/<code>")
+@login_required
+def api_game_state(code):
+    user = current_user()
+    game = game_for_user(code, user)
+    if not game:
+        return jsonify({"error": "Partida não encontrada."}), 404
+    touch_presence(user)
+    return jsonify(serialize_game(game, user, include_state=True))
+
+
+@app.post("/api/games/<code>/move")
+@login_required
+def api_game_move(code):
+    user = current_user()
+    payload = request.get_json(silent=True) or {}
+    game = game_for_user(code, user)
+    if not game:
+        return jsonify({"error":"Partida não encontrada."}), 404
+    if game.status != "active":
+        return jsonify({"error":"Essa partida já terminou."}), 409
+    with GAME_LOCKS[game.id]:
+        # Atualiza a instância antes de validar a vez, reduzindo risco de jogada duplicada.
+        db.session.refresh(game)
+        if game.status != "active":
+            return jsonify({"error":"Essa partida já terminou."}), 409
+        state = parse_game_state(game)
+        try:
+            if game.game_type == "tictactoe":
+                summary = apply_tictactoe_move(game, state, user, payload)
+            elif game.game_type == "checkers":
+                summary = apply_checkers_move(game, state, user, payload)
+            elif game.game_type == "truco":
+                summary = apply_truco_move(game, state, user, payload)
+            else:
+                raise ValueError("Jogo não suportado.")
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        save_game_state(game, state)
+        game.last_move_at = utcnow()
+        db.session.add(GameMove(
+            game_id=game.id,
+            player_id=user.id,
+            move_json=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            summary=summary[:240],
+        ))
+        db.session.commit()
+
+    # Push sempre para a outra pessoa quando a jogada for concluída. Se ainda for
+    # a vez do mesmo jogador (captura múltipla), apenas o estado persistido muda.
+    opponent = game_opponent(game, user.id)
+    if opponent:
+        if game.status == "finished" or game.turn_user_id == opponent.id:
+            send_user_push(
+                opponent.id,
+                f"🎮 {game_type_info(game.game_type)['name']} • Nossa Sala",
+                game_move_summary_for_push(game, user),
+                url_for("game_page", code=game.code),
+                f"game-{game.code}",
+            )
+    return jsonify({"status":"ok", "game": serialize_game(game, user, include_state=True)})
+
+
+@app.post("/api/games/<code>/resign")
+@login_required
+def api_game_resign(code):
+    user = current_user()
+    game = game_for_user(code, user)
+    if not game:
+        return jsonify({"error":"Partida não encontrada."}), 404
+    if game.status != "active":
+        return jsonify({"error":"Essa partida já terminou."}), 409
+    opponent = game_opponent(game, user.id)
+    game.status = "finished"
+    game.winner_user_id = opponent.id if opponent else None
+    game.turn_user_id = None
+    state = parse_game_state(game)
+    state["winner"] = game.winner_user_id
+    state["turn"] = None
+    state["resigned_by"] = user.id
+    save_game_state(game, state)
+    game.last_move_at = utcnow()
+    db.session.add(GameMove(game_id=game.id, player_id=user.id, move_json='{"resign":true}', summary="desistiu da partida"))
+    db.session.commit()
+    if opponent:
+        send_user_push(opponent.id, "🎮 Partida encerrada • Nossa Sala", f"{user.full_name} desistiu de {game_type_info(game.game_type)['name']}. Você venceu.", url_for("game_page", code=game.code), f"game-{game.code}")
+    return jsonify({"status":"ok", "game": serialize_game(game, user, include_state=True)})
+
+
+@app.post("/api/games/<code>/rematch")
+@login_required
+def api_game_rematch(code):
+    user = current_user()
+    old = game_for_user(code, user)
+    if not old:
+        return jsonify({"error":"Partida não encontrada."}), 404
+    opponent = game_opponent(old, user.id)
+    if not opponent or not opponent.active:
+        return jsonify({"error":"O outro jogador não está disponível."}), 400
+    new_code = new_game_code()
+    state = initial_game_state(old.game_type, user.id, opponent.id)
+    game = GameSession(code=new_code, game_type=old.game_type, player_a_id=user.id, player_b_id=opponent.id, created_by_id=user.id, status="active", turn_user_id=user.id, state_json=json.dumps(state, ensure_ascii=False, separators=(",", ":")), updated_at=utcnow())
+    db.session.add(game); db.session.commit()
+    info = game_type_info(game.game_type)
+    send_user_push(opponent.id, f"{info['icon']} Revanche • Nossa Sala", f"{user.full_name} abriu uma revanche de {info['name']}.", url_for("game_page", code=new_code), f"game-{new_code}")
+    return jsonify({"status":"ok", "url": url_for("game_page", code=new_code)})
 
 
 @app.get("/manifest.webmanifest")
