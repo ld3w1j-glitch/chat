@@ -567,6 +567,24 @@ class MessageEvent(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
 
 
+class MessageReaction(db.Model):
+    __table_args__ = (
+        UniqueConstraint("message_id", "user_id", "emoji", name="uq_message_reaction_user_emoji"),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, nullable=False, index=True)
+    user_id = db.Column(db.Integer, nullable=False, index=True)
+    emoji = db.Column(db.String(32), nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class MessageReactionEvent(db.Model):
+    """Eventos mínimos para sincronizar reações já exibidas nos dois aparelhos."""
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, nullable=False, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 class ConversationRead(db.Model):
     __table_args__ = (UniqueConstraint("conversation_id", "user_id", name="uq_conversation_read_user"),)
     id = db.Column(db.Integer, primary_key=True)
@@ -627,9 +645,30 @@ class GameChatMessage(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False, index=True)
 
 
+class GameChatReaction(db.Model):
+    __table_args__ = (
+        UniqueConstraint("message_id", "user_id", "emoji", name="uq_game_chat_reaction_user_emoji"),
+    )
+    id = db.Column(db.Integer, primary_key=True)
+    game_id = db.Column(db.Integer, nullable=False, index=True)
+    message_id = db.Column(db.Integer, nullable=False, index=True)
+    user_id = db.Column(db.Integer, nullable=False, index=True)
+    emoji = db.Column(db.String(32), nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+
+
+class GameChatReactionEvent(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    game_id = db.Column(db.Integer, nullable=False, index=True)
+    message_id = db.Column(db.Integer, nullable=False, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 def delete_game_records(game: GameSession, commit: bool = True) -> None:
     """Remove partida, jogadas e chat para não acumular histórico encerrado."""
     game_id = int(game.id)
+    GameChatReaction.query.filter_by(game_id=game_id).delete(synchronize_session=False)
+    GameChatReactionEvent.query.filter_by(game_id=game_id).delete(synchronize_session=False)
     GameChatMessage.query.filter_by(game_id=game_id).delete(synchronize_session=False)
     GameMove.query.filter_by(game_id=game_id).delete(synchronize_session=False)
     db.session.delete(game)
@@ -903,6 +942,20 @@ def reply_data_for(message: Message) -> dict | None:
     return message_preview(original)
 
 
+def message_reactions_for(message: Message) -> list[dict]:
+    reactions = MessageReaction.query.filter_by(message_id=message.id).order_by(MessageReaction.id.asc()).all()
+    if not reactions:
+        return []
+    me = current_user()
+    grouped: dict[str, dict] = {}
+    for reaction in reactions:
+        item = grouped.setdefault(reaction.emoji, {"emoji": reaction.emoji, "count": 0, "mine": False})
+        item["count"] += 1
+        if me and reaction.user_id == me.id:
+            item["mine"] = True
+    return list(grouped.values())
+
+
 def serialize_message(message: Message) -> dict:
     state = message_effective_state(message)
     created_at = as_utc_aware(message.created_at)
@@ -915,6 +968,7 @@ def serialize_message(message: Message) -> dict:
         "reply": reply_data_for(message),
         "edited": state["edited"],
         "deleted": state["deleted"],
+        "reactions": [] if state["deleted"] else message_reactions_for(message),
     }
     if state["deleted"]:
         data.update({"kind": "deleted", "text": "Mensagem apagada"})
@@ -1036,6 +1090,17 @@ def game_opponent(game: GameSession, user_id: int) -> User | None:
     return db.session.get(User, other_id)
 
 
+def game_chat_reactions_for(message: GameChatMessage, viewer: User) -> list[dict]:
+    rows = GameChatReaction.query.filter_by(message_id=message.id).order_by(GameChatReaction.id.asc()).all()
+    grouped: dict[str, dict] = {}
+    for reaction in rows:
+        item = grouped.setdefault(reaction.emoji, {"emoji": reaction.emoji, "count": 0, "mine": False})
+        item["count"] += 1
+        if reaction.user_id == viewer.id:
+            item["mine"] = True
+    return list(grouped.values())
+
+
 def serialize_game_chat_message(message: GameChatMessage, viewer: User) -> dict:
     author = db.session.get(User, message.user_id)
     created = as_utc_aware(message.created_at)
@@ -1049,6 +1114,7 @@ def serialize_game_chat_message(message: GameChatMessage, viewer: User) -> dict:
         "author_photo_url": user_photo_url(author) if author else None,
         "text": message.text,
         "created_at": utc_iso(created),
+        "reactions": game_chat_reactions_for(message, viewer),
     }
 
 
@@ -2498,6 +2564,60 @@ def delete_message(code, message_id):
     return jsonify(serialize_message(message))
 
 
+@app.post("/api/messages/<code>/<int:message_id>/reactions")
+@login_required
+def toggle_message_reaction(code, message_id):
+    user = current_user()
+    if not conversation_for_user(code, user):
+        return jsonify({"error": "Acesso negado."}), 403
+    message = db.session.get(Message, message_id)
+    if not message or message.room_code != code:
+        return jsonify({"error": "Mensagem não encontrada."}), 404
+    if message_effective_state(message)["deleted"]:
+        return jsonify({"error": "Não é possível reagir a uma mensagem apagada."}), 400
+
+    data = request.get_json(silent=True) or {}
+    emoji = str(data.get("emoji") or "").strip()
+    if not emoji or len(emoji) > 32 or any(ch in emoji for ch in "\n\r\t"):
+        return jsonify({"error": "Emoji inválido."}), 400
+
+    existing = MessageReaction.query.filter_by(message_id=message.id, user_id=user.id, emoji=emoji).first()
+    if existing:
+        db.session.delete(existing)
+        action = "removed"
+    else:
+        db.session.add(MessageReaction(message_id=message.id, user_id=user.id, emoji=emoji))
+        action = "added"
+    db.session.flush()
+    db.session.add(MessageReactionEvent(message_id=message.id))
+    user.last_seen = utcnow()
+    db.session.commit()
+    return jsonify({"status": "ok", "action": action, "message": serialize_message(message)})
+
+
+@app.get("/api/messages/<code>/reaction-changes")
+@login_required
+def message_reaction_changes(code):
+    user = current_user()
+    if not conversation_for_user(code, user):
+        return jsonify({"error": "Acesso negado."}), 403
+    after_event = request.args.get("after_event", type=int, default=0)
+    events = (
+        db.session.query(MessageReactionEvent)
+        .join(Message, Message.id == MessageReactionEvent.message_id)
+        .filter(Message.room_code == code, MessageReactionEvent.id > after_event)
+        .order_by(MessageReactionEvent.id.asc())
+        .limit(200)
+        .all()
+    )
+    changes = []
+    for event in events:
+        message = db.session.get(Message, event.message_id)
+        if message:
+            changes.append({"event_id": event.id, "message": serialize_message(message)})
+    return jsonify({"changes": changes})
+
+
 @app.get("/api/stickers/<code>")
 @login_required
 def list_stickers(code):
@@ -3112,6 +3232,51 @@ def api_game_chat_send(code):
         )
 
     return jsonify({"status": "ok", "message": serialize_game_chat_message(message, user)})
+
+
+@app.post("/api/games/<code>/chat/<int:message_id>/reactions")
+@login_required
+def api_game_chat_reaction_toggle(code, message_id):
+    user = current_user()
+    game = game_for_user(code, user)
+    if not game:
+        return jsonify({"error": "Partida não encontrada."}), 404
+    message = db.session.get(GameChatMessage, message_id)
+    if not message or message.game_id != game.id:
+        return jsonify({"error": "Mensagem não encontrada."}), 404
+    data = request.get_json(silent=True) or {}
+    emoji = str(data.get("emoji") or "").strip()
+    if not emoji or len(emoji) > 32 or any(ch in emoji for ch in "\n\r\t"):
+        return jsonify({"error": "Emoji inválido."}), 400
+    existing = GameChatReaction.query.filter_by(message_id=message.id, user_id=user.id, emoji=emoji).first()
+    if existing:
+        db.session.delete(existing)
+    else:
+        db.session.add(GameChatReaction(game_id=game.id, message_id=message.id, user_id=user.id, emoji=emoji))
+    db.session.flush()
+    db.session.add(GameChatReactionEvent(game_id=game.id, message_id=message.id))
+    db.session.commit()
+    return jsonify({"status": "ok", "message": serialize_game_chat_message(message, user)})
+
+
+@app.get("/api/games/<code>/chat/reaction-changes")
+@login_required
+def api_game_chat_reaction_changes(code):
+    user = current_user()
+    game = game_for_user(code, user)
+    if not game:
+        return jsonify({"error": "Partida não encontrada."}), 404
+    after_event = request.args.get("after_event", type=int, default=0)
+    events = GameChatReactionEvent.query.filter(
+        GameChatReactionEvent.game_id == game.id,
+        GameChatReactionEvent.id > after_event,
+    ).order_by(GameChatReactionEvent.id.asc()).limit(100).all()
+    changes = []
+    for event in events:
+        message = db.session.get(GameChatMessage, event.message_id)
+        if message and message.game_id == game.id:
+            changes.append({"event_id": event.id, "message": serialize_game_chat_message(message, user)})
+    return jsonify({"changes": changes})
 
 
 @app.post("/api/games/<code>/resign")

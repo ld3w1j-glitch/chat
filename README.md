@@ -338,3 +338,17 @@ Partidas finalizadas não ficam acumuladas. Quando há vitória, empate ou desis
 ## Correção de horário
 
 A aplicação continua salvando datas em UTC no banco, mas agora converte a exibição para `America/Sao_Paulo` (UTC-3), configurável por `APP_TIMEZONE`. Valores enviados ao JavaScript usam `Z` explícito para evitar o navegador interpretar UTC como horário local. A correção vale para mensagens, chat de jogos, histórico de jogadas, partidas e painel admin.
+
+
+## Emojis e balões
+
+- Biblioteca de emojis ampliada com rostos, gestos, corações, animais, comida, jogos, objetos, viagens e símbolos.
+- Balões do chat principal e do chat dos jogos agora têm transparência suave.
+
+
+## Reações com emojis
+
+As mensagens do chat agora possuem **Reagir**. Cada usuário pode adicionar ou remover emojis, inclusive usando a biblioteca ampliada. As reações são persistidas no banco e sincronizadas entre os dois aparelhos. Emojis iguais são agrupados com contador.
+
+### Reações também no chat dos jogos
+O chat particular de cada partida também aceita reações rápidas com emojis, sincronizadas entre os dois jogadores e removidas junto com a partida quando ela é encerrada.

@@ -3,7 +3,8 @@
   const boardEl=$('gameBoard'), statusEl=$('gameStatus'), historyEl=$('moveHistory'), statusBar=$('statusBar'), resignBtn=$('resignBtn'), rematchBtn=$('rematchBtn');
   const gameChatMessages=$('gameChatMessages'), gameChatForm=$('gameChatForm'), gameChatInput=$('gameChatInput'), gameChatSend=$('gameChatSend');
   let current=null, selectedChecker=null, loading=false, sending=false, lastSignature='';
-  let gameChatLastId=0, loadingGameChat=false, sendingGameChat=false, gameChatInitialized=false;
+  let gameChatLastId=0, gameChatReactionEventId=0, loadingGameChat=false, sendingGameChat=false, gameChatInitialized=false;
+  const GAME_CHAT_REACTIONS=["❤️","😂","😍","👍","👎","😮","😢","😡","🔥","👏","🎉","🤔"];
   function escapeHtml(v){const d=document.createElement('div');d.textContent=v??'';return d.innerHTML;}
   function notify(msg,error=false){statusBar.textContent=msg;statusBar.classList.remove('hidden','error');if(error)statusBar.classList.add('error');setTimeout(()=>statusBar.classList.add('hidden'),4500);}
   function setTurnBanner(g){
@@ -52,15 +53,42 @@
   }
   function renderHistory(g){const moves=g.recent_moves||[];historyEl.innerHTML='';if(!moves.length){historyEl.innerHTML='<div class="empty-state">A partida ainda não tem jogadas.</div>';return;}for(const m of moves.slice().reverse()){const row=document.createElement('div');row.className='game-move-row';row.innerHTML=`<strong>${escapeHtml(m.player_name)}</strong><span>${escapeHtml(m.summary)}</span><small>${new Date(m.created_at).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}</small>`;historyEl.appendChild(row);}}
   function gameChatTime(value){try{return new Date(value).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}catch(_){return '';}}
-  function appendGameChatMessage(m,scroll=true){
-    if(!gameChatMessages||gameChatMessages.querySelector(`[data-chat-id="${Number(m.id)}"]`))return;
+  async function reactGameChat(m,emoji){
+    try{
+      const r=await fetch(`/api/games/${CFG.code}/chat/${m.id}/reactions`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({emoji})});
+      const data=await r.json();
+      if(!r.ok)throw new Error(data.error||'Não foi possível reagir.');
+      renderGameChatMessage(data.message,false);
+    }catch(e){notify(e.message,true);}
+  }
+  function renderGameChatMessage(m,scroll=true){
+    if(!gameChatMessages)return;
     gameChatMessages.querySelector('.game-chat-empty')?.remove();
+    const existing=gameChatMessages.querySelector(`[data-chat-id="${Number(m.id)}"]`);
     const row=document.createElement('div');row.className=`game-chat-row ${m.mine?'mine':'other'}`;row.dataset.chatId=String(m.id);
     const avatar=m.author_photo_url?`<img src="${escapeHtml(m.author_photo_url)}" alt="">`:`<span>${escapeHtml((m.author_name||'?').slice(0,1).toUpperCase())}</span>`;
-    row.innerHTML=`<div class="game-chat-avatar">${avatar}</div><div class="game-chat-bubble"><div class="game-chat-meta"><strong>${m.mine?'Você':escapeHtml(m.author_name)}</strong><time>${gameChatTime(m.created_at)}</time></div><div class="game-chat-text">${escapeHtml(m.text)}</div></div>`;
-    gameChatMessages.appendChild(row);gameChatLastId=Math.max(gameChatLastId,Number(m.id)||0);if(scroll)gameChatMessages.scrollTop=gameChatMessages.scrollHeight;
+    const av=document.createElement('div');av.className='game-chat-avatar';av.innerHTML=avatar;
+    const bubble=document.createElement('div');bubble.className='game-chat-bubble';
+    const meta=document.createElement('div');meta.className='game-chat-meta';meta.innerHTML=`<strong>${m.mine?'Você':escapeHtml(m.author_name)}</strong><time>${gameChatTime(m.created_at)}</time>`;
+    const text=document.createElement('div');text.className='game-chat-text';text.textContent=m.text;
+    const reactions=document.createElement('div');reactions.className='game-chat-reactions';
+    for(const reaction of (m.reactions||[])){
+      const chip=document.createElement('button');chip.type='button';chip.className=`game-chat-reaction-chip ${reaction.mine?'mine':''}`;chip.textContent=`${reaction.emoji} ${reaction.count}`;chip.addEventListener('click',()=>reactGameChat(m,reaction.emoji));reactions.appendChild(chip);
+    }
+    const actions=document.createElement('div');actions.className='game-chat-actions';
+    const react=document.createElement('button');react.type='button';react.className='game-chat-react-btn';react.textContent='☺ Reagir';
+    const picker=document.createElement('div');picker.className='game-chat-reaction-picker hidden';
+    for(const emoji of GAME_CHAT_REACTIONS){const b=document.createElement('button');b.type='button';b.textContent=emoji;b.addEventListener('click',async e=>{e.stopPropagation();await reactGameChat(m,emoji);picker.classList.add('hidden');});picker.appendChild(b);}
+    react.addEventListener('click',e=>{e.stopPropagation();document.querySelectorAll('.game-chat-reaction-picker').forEach(x=>{if(x!==picker)x.classList.add('hidden');});picker.classList.toggle('hidden');});
+    actions.append(react,picker);bubble.append(meta,text);if((m.reactions||[]).length)bubble.append(reactions);bubble.append(actions);row.append(av,bubble);
+    if(existing)existing.replaceWith(row);else gameChatMessages.appendChild(row);
+    gameChatLastId=Math.max(gameChatLastId,Number(m.id)||0);if(scroll)gameChatMessages.scrollTop=gameChatMessages.scrollHeight;
   }
-  async function loadGameChat(){if(!gameChatMessages||loadingGameChat)return;loadingGameChat=true;try{const r=await fetch(`/api/games/${CFG.code}/chat?after=${gameChatLastId}`,{cache:'no-store'});if(r.status===401){location.href='/login';return;}const data=await r.json();if(!r.ok)throw new Error(data.error||'Não foi possível carregar o chat.');const messages=data.messages||[];if(!gameChatInitialized){gameChatMessages.innerHTML='';gameChatInitialized=true;}for(const m of messages)appendGameChatMessage(m,true);if(!gameChatMessages.children.length)gameChatMessages.innerHTML='<div class="empty-state game-chat-empty">Nenhuma mensagem nesta partida ainda.</div>';}catch(e){console.warn(e);}finally{loadingGameChat=false;}}
+  function appendGameChatMessage(m,scroll=true){renderGameChatMessage(m,scroll);}
+  async function loadGameChatReactionChanges(){
+    try{const r=await fetch(`/api/games/${CFG.code}/chat/reaction-changes?after_event=${gameChatReactionEventId}`,{cache:'no-store'});if(!r.ok)return;const data=await r.json();for(const change of (data.changes||[])){gameChatReactionEventId=Math.max(gameChatReactionEventId,Number(change.event_id)||0);renderGameChatMessage(change.message,false);}}catch(_){}
+  }
+  async function loadGameChat(){if(!gameChatMessages||loadingGameChat)return;loadingGameChat=true;try{const r=await fetch(`/api/games/${CFG.code}/chat?after=${gameChatLastId}`,{cache:'no-store'});if(r.status===401){location.href='/login';return;}const data=await r.json();if(!r.ok)throw new Error(data.error||'Não foi possível carregar o chat.');const messages=data.messages||[];if(!gameChatInitialized){gameChatMessages.innerHTML='';gameChatInitialized=true;}for(const m of messages)appendGameChatMessage(m,true);await loadGameChatReactionChanges();if(!gameChatMessages.children.length)gameChatMessages.innerHTML='<div class="empty-state game-chat-empty">Nenhuma mensagem nesta partida ainda.</div>';}catch(e){console.warn(e);}finally{loadingGameChat=false;}}
   async function sendGameChat(){if(sendingGameChat||!gameChatInput)return;const text=gameChatInput.value.trim();if(!text)return;sendingGameChat=true;gameChatSend.disabled=true;try{const r=await fetch(`/api/games/${CFG.code}/chat`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});const data=await r.json();if(!r.ok)throw new Error(data.error||'Não foi possível enviar.');const empty=gameChatMessages?.querySelector('.game-chat-empty');if(empty)empty.remove();appendGameChatMessage(data.message,true);gameChatInput.value='';gameChatInput.focus();}catch(e){notify(e.message,true);}finally{sendingGameChat=false;gameChatSend.disabled=false;}}
   function render(g){setTurnBanner(g);if(g.game_type==='tictactoe')renderTic(g);else if(g.game_type==='checkers')renderCheckers(g);else if(g.game_type==='truco')renderTruco(g);renderHistory(g);}
   async function load(){if(loading||sending)return;loading=true;try{const r=await fetch(`/api/games/${CFG.code}`,{cache:'no-store'});if(r.status===401){location.href='/login';return;}if(r.status===404){notify('Esta partida já foi encerrada e removida.');setTimeout(()=>location.href='/games',1200);return;}if(r.status===409){const data=await r.json();location.href=data.invite_url||`/game-invite/${CFG.code}`;return;}const data=await r.json();if(!r.ok)throw new Error(data.error||'Partida não encontrada.');const sig=JSON.stringify([data.updated_at,data.turn_user_id,data.status,data.recent_moves?.length]);current=data;if(sig!==lastSignature){lastSignature=sig;render(data);}}catch(e){notify(e.message,true);}finally{loading=false;}}
@@ -68,5 +96,6 @@
   rematchBtn.addEventListener('click',async()=>{rematchBtn.disabled=true;try{const r=await fetch(`/api/games/${CFG.code}/rematch`,{method:'POST'});const data=await r.json();if(!r.ok)throw new Error(data.error||'Não foi possível criar revanche.');location.href=data.url;}catch(e){notify(e.message,true);rematchBtn.disabled=false;}});
   gameChatForm?.addEventListener('submit',e=>{e.preventDefault();sendGameChat();});
   gameChatInput?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendGameChat();}});
+  document.addEventListener('click',e=>{if(!e.target.closest('.game-chat-actions'))document.querySelectorAll('.game-chat-reaction-picker').forEach(x=>x.classList.add('hidden'));});
   load();loadGameChat();setInterval(load,2200);setInterval(loadGameChat,1200);setInterval(()=>NossaSala.ping(),20000);
 })();

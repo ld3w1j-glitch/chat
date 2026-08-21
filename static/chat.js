@@ -2,10 +2,11 @@
   const ROOM = window.CHAT_CONFIG.room;
   const USERNAME = window.CHAT_CONFIG.username;
   const $ = id => document.getElementById(id);
-  const EMOJIS = ["😀","😃","😄","😁","😆","😅","😂","🤣","😊","🥰","😍","😘","😚","😋","😜","🤪","🤗","🤭","😎","🥳","😏","😒","🙄","🥺","😭","😡","🤯","😴","🤔","🫡","🤝","👏","🙌","🙏","👍","👎","❤️","🩷","🧡","💛","💚","💙","💜","🖤","🤍","💔","💕","💞","💓","💗","💖","💘","💝","🔥","✨","⭐","🌙","☀️","🌹","🌸","🍕","🍔","🍫","☕","🍻","🎂","🎉","🎁","🎵","🎮","📷","🐶","🐱","🐻","🦊","🐼","🙈","🙉","🙊","💋","💌","🏠","🚗","✈️","✅","❌","⚠️","💯"];
+  const EMOJIS = ["😀","😃","😄","😁","😆","😅","😂","🤣","😊","😇","🙂","🙃","😉","😌","😍","🥰","😘","😗","😙","😚","😋","😛","😝","😜","🤪","🤨","🧐","🤓","😎","🥸","🤩","🥳","😏","😒","😞","😔","😟","😕","🙁","☹️","😣","😖","😫","😩","🥺","😢","😭","😤","😠","😡","🤬","🤯","😳","🥵","🥶","😱","😨","😰","😥","😓","🤗","🤔","🫣","🤭","🫢","🫡","🤫","🫠","🤥","😶","😶‍🌫️","😐","😑","😬","🙄","😯","😦","😧","😮","😲","🥱","😴","🤤","😪","😵","😵‍💫","🤐","🥴","🤢","🤮","🤧","😷","🤒","🤕","😈","👿","👹","👺","🤡","💩","👻","💀","☠️","👽","👾","🤖","🎃","👍","👎","👌","🤌","🤏","✌️","🤞","🫰","🤟","🤘","🤙","👈","👉","👆","👇","☝️","🖐️","✋","🤚","👋","🤝","👏","🙌","🫶","👐","🤲","🙏","✍️","💪","🦾","🫵","👀","👁️","👄","💋","🧠","🫀","❤️","🩷","🧡","💛","💚","💙","🩵","💜","🤎","🖤","🩶","🤍","💔","❤️‍🔥","❤️‍🩹","💕","💞","💓","💗","💖","💘","💝","💟","❣️","💌","💋","🔥","✨","⭐","🌟","💫","⚡","💥","💢","💦","💨","🕳️","💤","🎉","🎊","🎈","🎁","🎀","🏆","🥇","🥈","🥉","🎯","🎲","🎮","🕹️","🧩","♟️","🎰","🃏","🀄","🌞","☀️","🌤️","⛅","🌥️","☁️","🌧️","⛈️","🌩️","🌨️","❄️","☃️","🌬️","🌈","🌙","🌚","🌝","🌛","🌜","🌍","🌎","🌏","🌋","🏝️","🏖️","🌹","🌷","🌸","💐","🌺","🌻","🌼","🪻","🌱","🌿","🍀","☘️","🌵","🌴","🌳","🍁","🍂","🍃","🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐻‍❄️","🐨","🐯","🦁","🐮","🐷","🐸","🐵","🙈","🙉","🙊","🐔","🐧","🐦","🦆","🦅","🦉","🦇","🐺","🐗","🐴","🦄","🐝","🦋","🐌","🐞","🐜","🕷️","🐢","🐍","🦎","🐙","🦑","🦀","🐠","🐟","🐬","🐳","🦈","🍎","🍏","🍐","🍊","🍋","🍌","🍉","🍇","🍓","🫐","🍈","🍒","🍑","🥭","🍍","🥥","🥝","🍅","🥑","🥦","🌽","🥕","🍄","🥜","🍞","🥐","🥖","🧀","🥚","🍳","🥓","🍔","🍟","🍕","🌭","🥪","🌮","🌯","🍝","🍜","🍣","🍤","🍚","🍛","🍿","🍩","🍪","🎂","🍰","🧁","🍫","🍬","🍭","🍯","☕","🫖","🥤","🧃","🍺","🍻","🥂","🍷","🍹","🧉","⚽","🏀","🏈","⚾","🎾","🏐","🎱","🏓","🏸","🥊","🥋","⛳","🏹","🎣","🏋️","🚴","🏃","🏊","🤸","🧘","🎵","🎶","🎤","🎧","🎸","🎹","🥁","🎺","🎻","🎬","🎨","📷","📸","📱","💻","⌨️","🖥️","📺","💡","🔦","🔋","⌚","⏰","📌","📍","📎","✂️","📝","📖","📚","💰","💎","🔑","🔒","🔓","🛒","🏠","🏡","🏢","🏥","🏫","🏨","⛪","🏰","🌆","🌃","🚗","🚕","🚌","🏎️","🚓","🚑","🚒","🚲","🏍️","✈️","🚀","🚁","🚢","🚆","🚇","🗺️","🧳","✅","❌","⭕","❗","❓","‼️","⁉️","⚠️","🚫","💯","🔴","🟠","🟡","🟢","🔵","🟣","⚫","⚪","🟤","🔺","🔻","⬆️","⬇️","⬅️","➡️","🔄","🔁","➕","➖","✖️","➗","✔️","☑️","🔔","🔕","💬","🗨️","🗯️","💭","📢","📣","🆗","🆒","🆕","🆙","🆘"];
 
   let lastId = 0;
   let lastEventId = 0;
+  let lastReactionEventId = 0;
   let partnerLastReadId = 0;
   let loadingMessages = false;
   let loadingChanges = false;
@@ -586,6 +587,113 @@
     }
   }
 
+  const QUICK_REACTIONS = ["❤️","😂","😍","🥰","👍","👎","😮","😢","😡","🔥","👏","🎉","🤔","🙄","💯","✅"];
+
+  async function reactToMessage(m, emoji) {
+    try {
+      const r = await fetch(`/api/messages/${ROOM}/${m.id}/reactions`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({emoji})
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "Não foi possível reagir.");
+      applyMessageUpdate(data.message);
+    } catch (err) {
+      status(err.message, true);
+    }
+  }
+
+  let fullReactionPalette = null;
+  let fullReactionTarget = null;
+
+  function ensureFullReactionPalette() {
+    if (fullReactionPalette) return fullReactionPalette;
+    const sheet = document.createElement("div");
+    sheet.className = "reaction-full-picker hidden";
+    const head = document.createElement("div");
+    head.className = "reaction-full-head";
+    const title = document.createElement("strong");
+    title.textContent = "Escolha uma reação";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "reaction-full-close";
+    close.textContent = "×";
+    close.addEventListener("click", () => sheet.classList.add("hidden"));
+    head.append(title, close);
+    const grid = document.createElement("div");
+    grid.className = "reaction-all-grid";
+    for (const emoji of EMOJIS) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "reaction-emoji-btn";
+      btn.textContent = emoji;
+      btn.addEventListener("click", async () => {
+        if (!fullReactionTarget) return;
+        await reactToMessage(fullReactionTarget, emoji);
+        sheet.classList.add("hidden");
+      });
+      grid.appendChild(btn);
+    }
+    sheet.append(head, grid);
+    document.body.appendChild(sheet);
+    fullReactionPalette = sheet;
+    return sheet;
+  }
+
+  function openFullReactionPalette(m) {
+    fullReactionTarget = m;
+    ensureFullReactionPalette().classList.remove("hidden");
+  }
+
+  function createReactionPicker(m) {
+    const picker = document.createElement("div");
+    picker.className = "reaction-picker hidden";
+    const quick = document.createElement("div");
+    quick.className = "reaction-picker-grid";
+    for (const emoji of QUICK_REACTIONS) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "reaction-emoji-btn";
+      btn.textContent = emoji;
+      btn.title = `Reagir com ${emoji}`;
+      btn.addEventListener("click", async e => {
+        e.stopPropagation();
+        await reactToMessage(m, emoji);
+        picker.classList.add("hidden");
+      });
+      quick.appendChild(btn);
+    }
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "reaction-more-btn";
+    more.textContent = "＋ Mais emojis";
+    more.addEventListener("click", e => {
+      e.stopPropagation();
+      picker.classList.add("hidden");
+      openFullReactionPalette(m);
+    });
+    picker.append(quick, more);
+    return picker;
+  }
+
+  function appendReactionBar(bubble, m) {
+    const reactions = Array.isArray(m.reactions) ? m.reactions : [];
+    if (!reactions.length) return;
+    const bar = document.createElement("div");
+    bar.className = "reaction-bar";
+    for (const reaction of reactions) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "reaction-chip" + (reaction.mine ? " mine" : "");
+      chip.textContent = `${reaction.emoji} ${reaction.count}`;
+      chip.title = reaction.mine ? "Clique para remover sua reação" : "Clique para reagir também";
+      chip.addEventListener("click", () => reactToMessage(m, reaction.emoji));
+      bar.appendChild(chip);
+    }
+    bubble.appendChild(bar);
+  }
+
   function buildMessageRow(m) {
     const mine = m.author === USERNAME;
     const row = document.createElement("div");
@@ -698,6 +806,21 @@
     footer.className = "message-footer";
 
     if (!m.deleted && m.kind !== "deleted") {
+      const reactionWrap = document.createElement("div");
+      reactionWrap.className = "reaction-action-wrap";
+      const reactBtn = document.createElement("button");
+      reactBtn.type = "button";
+      reactBtn.className = "reply-message-btn reaction-action-btn";
+      reactBtn.textContent = "☺ Reagir";
+      const picker = createReactionPicker(m);
+      reactBtn.addEventListener("click", e => {
+        e.stopPropagation();
+        document.querySelectorAll(".reaction-picker").forEach(p => { if (p !== picker) p.classList.add("hidden"); });
+        picker.classList.toggle("hidden");
+      });
+      reactionWrap.append(reactBtn, picker);
+      footer.appendChild(reactionWrap);
+
       const replyBtn = document.createElement("button");
       replyBtn.type = "button";
       replyBtn.className = "reply-message-btn";
@@ -730,6 +853,7 @@
       footer.appendChild(receipt);
     }
 
+    appendReactionBar(bubble, m);
     bubble.appendChild(footer);
     row.appendChild(bubble);
     return row;
@@ -788,6 +912,18 @@
     }
   }
 
+  async function loadReactionChanges() {
+    try {
+      const r = await fetch(`/api/messages/${ROOM}/reaction-changes?after_event=${lastReactionEventId}`, {cache:"no-store"});
+      if (!r.ok) return;
+      const payload = await r.json();
+      for (const change of (payload.changes || [])) {
+        lastReactionEventId = Math.max(lastReactionEventId, Number(change.event_id || 0));
+        if (seen.has(change.message.id)) applyMessageUpdate(change.message);
+      }
+    } catch (_) {}
+  }
+
   async function loadChanges() {
     if (loadingChanges) return;
     loadingChanges = true;
@@ -799,6 +935,7 @@
         lastEventId = Math.max(lastEventId, Number(change.event_id || 0));
         if (seen.has(change.message.id)) applyMessageUpdate(change.message);
       }
+      await loadReactionChanges();
     } catch (_) {
     } finally {
       loadingChanges = false;
@@ -954,6 +1091,9 @@
   });
   cancelAttachmentBtn?.addEventListener("click", clearAttachment);
   document.addEventListener("click", e => { if (!e.target.closest(".attach-menu-wrap")) hideAttachmentMenu(); });
+  document.addEventListener("click", e => {
+    if (!e.target.closest(".reaction-action-wrap")) document.querySelectorAll(".reaction-picker").forEach(p => p.classList.add("hidden"));
+  });
 
   function showTool(tab) {
     hideFofocaComposer(false);
